@@ -1,0 +1,290 @@
+<div align="center">
+  <h1>derive_parser</h1>
+  <p>
+    <!-- TODO: Add links -->
+    <a href="https://docs.rs/">docs.rs</a> |
+    <a href="https://crates.io/crates/">crates.io</a> |
+    <a href="https://github.com/jakesarjeant/">github.com</a>
+  </p>
+  <p>
+  <!-- TODO: Badges -->
+  <!-- <img alt="License: BSD 3-clause" src="https://img.shields.io/github/license/jakesarjeant/macaroons?color=orange&style=for-the-badge" /> -->
+  <!-- <img alt="Latest release" src="https://img.shields.io/crates/v/rustmacaroon?color=yellow&style=for-the-badge" /> -->
+  <!-- <img alt="Github issue counter" src="https://img.shields.io/github/issues/jakesarjeant/macaroons?style=for-the-badge" /> -->
+  </p>
+</div>
+
+<p align="center">
+  <code>&lt;&gt;Derive parsers from CST representations&lt;/&gt;</code>
+</p>
+
+---
+
+# Example
+
+```rust
+use derive_parser::{Parse, Token};
+
+use TokenKind::*; // Implemented e.g. with Logos
+
+#[derive(Clone, Debug)]
+struct Token {
+  pub inner: TokenKind,
+  pub span: Span,
+  pub trailing_trivia: Option<String>,
+  pub string: String,
+}
+
+impl derive_parser::Token for Token {
+  type Kind = TokenKind;
+  fn kind(&self) -> Self::Kind {
+    self.inner
+  }
+
+  type Span = Span;
+  fn span(&self) -> Self::Span {
+    self.span
+  }
+}
+
+#[derive(Parse)]
+struct FunctionCall {
+  #[token(Ident)]
+  name: Token,
+  #[token(LParen)]
+  _lparen: Token,
+  #[delimiter(Comma, allow_trailing = true)]
+  args: Vec<Expression>,
+  #[token(RParen)]
+  _rparen: Token
+}
+
+#[derive(Parse)]
+enum Expression {
+  Call(FunctionCall),
+  #[token(Bool)]
+  #[token(Int)]
+  #[token(String(_))]
+  Literal(Token)
+}
+```
+
+By only annotating what can't be inferred from the syntax tree structs and deriving the rest of the parser implementation, `derive_parser` minimizes the amount of code needed to express your parser. In addition, this keeps your CST and parser implementations in sync, which should help you avoid bugs when updating your parser.
+
+<details>
+<summary>For comparison, here's the same parser written with chumsky:</summary>
+
+```rust
+use chumsky::{Parser, recursive::Recursive};
+
+#[derive(Clone)]
+struct Token {
+  pub inner: TokenKind,
+  pub span: Span,
+  pub trailing_trivia: Option<String>,
+  pub string: String,
+}
+
+macro_rules! just {
+  ($kind:pat) => {
+    select! {
+      t @ Token { inner: $kind, .. } => t
+    }
+  };
+}
+
+struct FunctionCall {
+  name: Token,
+  _lparen: Token,
+  args: Vec<Expression>,
+  _rparen: Token
+}
+
+enum Expression {
+  Call(FunctionCall),
+  Literal(Token)
+}
+
+fn parser<I>() -> impl Parser<I, FunctionCall, Simple<I>>
+where
+  I: Input<Token = Token, Span = SimpleSpan<usize, ()> + ValueInput
+{
+  use TokenKind::*;
+
+  let mut expression = Recursive::declare();
+
+  let function_call = just!(Ident)
+    .then(just!(LParen))
+    .then(expression.separated_by(just!(Comma)).allow_trailing)
+    .then(just!(RParen))
+    .map(|(((name, _lparen), args), _rparen)| {
+      FunctionCall { name, _lparen, args, _rparen }
+    });
+
+  expression.define(
+    just!(Bool)
+      .map(Expression::Literal)
+      .or(just!(Int).map(Expression::Literal))
+      .or(just!(String(_)).map(Expression::Literal))
+      .or(function_call.clone())
+  );
+
+  function_call
+}
+```
+
+Even with all that, many of the convenience methods (like `.span()` on nodes) that `derive_parser` provides are still not implemented here, and I didn't even try to make this zero-copy due to the sheer amount of lifetime-juggling.
+
+</summary>
+
+# Attributes
+
+If the right-hand side of a field implements `Syntax`, you don't need any attributes — the parser will automatically try to parse the field with its own `Syntax` implementation.
+
+Otherwise, you can use attributes to explain how to parse the field. You may use any number of the following attributes (you can have many of the same, too), so long as they all return the correct type for the field.
+
+## `#[token(PATTERN)]`
+
+By far the most common attribute is `#[token(...)]`. It applies a pattern to the next input token, consuming it if it matches:
+
+```rust
+enum TokenKind {
+  LParen,
+  RParen
+}
+type Token = derive_parser::Token<TokenKind>;
+
+#[derive(Syntax)]
+struct Parens {
+  // Match tokens containing a `TokenKind::LParen`
+  #[token(TokenKind::LParen)]
+  lparen: Token,
+  inner: Option<Parens>,
+  #[token(TokenKind::RParen)]
+  rparen: Token
+}
+```
+
+It is common to `use TokenKind::*` in your parser module to avoid repetition. You may use `#[token]` multiple times to allow different tokens on the same field:
+
+```rust
+// -- snip --
+use TokenKind::*;
+
+#[derive(Syntax)]
+struct Literal(
+  #[token(Bool)]
+  #[token(Int)]
+  #[token(Float)]
+  Token
+);
+```
+
+## `#[delimited(PATTERN[, allow_trailing = true])]`
+
+Parses into `Delimited<T, Token>`, capturing a sequence of `T` separated by tokens matching `PATTERN`:
+
+```rust
+#[derive(Syntax)]
+struct Args {
+  #[token(LParen)]
+  _lparen: Token,
+  #[delimited(Comma, allow_trailing = true)]
+  args: Delimited<Expr, Token>
+  #[token(RParen)]
+  _rparen: Token
+}
+```
+
+You can combine `#[delimited]` and `#[token]`, which will parse a sequence of tokens matched by token, delimited by the given delimiter. For example:
+
+```rust
+#[derive(Syntax)]
+struct IntBoolList {
+  #[token(Bool)]
+  #[token(Int)]
+  #[delimited(Comma)]
+  values: Delimited<Token, Token>
+}
+
+// This will parse something like:
+//   1,2,false,3,true
+```
+
+> [!NOTE]
+> `#[delimited]` may only be used once per field.
+
+# Utility Types and Implementations
+
+A number of utility types are provided, as well as implementations on utility types from the standard library. For example, `Option<T>`'s implementation will attempt to parse `T` and simply return `None` if it fails, and `Vec<T>` parses `T` as often as possible in sequence.
+
+By the same token as using `#[token]` with `#[delimited]`, `#[token]` will also automatically nest into `Vec` and `Option`:
+
+```rust
+#[derive(Syntax)]
+struct MaybeBool {
+  #[token(Bool)]
+  value: Option<Token>
+}
+```
+
+# Error recovery
+
+When possible, the parser will try to recover from syntax errors. In many cases, this will require a bit of guidance. For example, consider the following invalid JavaScript expression:
+
+```js
+while a > 5 {
+  console.log("Hello World!"
+}
+```
+
+A naive parser would simply break early with an `Expected '('`, but we can do better. Our principal tool for this is the `#[required]` attribute, which can be attached to any optional field. When this attribute is present, the parser will continue to parse if the item isn't present, but will still emit an error. The specific error that is emitted can be overwritten with `#[required(error = ...)]`.
+
+```rust
+#[derive(Syntax)]
+struct WhileStatement {
+  #[token(While)]
+  kw_while: Token,
+  #[token(LParen)]
+  #[required]
+  _lparen: Option<Token>,
+  cond: Expression,
+  #[token(RParen)]
+  #[required(error = "Missing ')' in while statement")]
+  _rparen: Option<Token>,
+  #[token(LBrace)]
+  _lbrace: Token,
+  body: Vec<Statement>
+  #[token(RBrace)]
+  _rbrace: Token
+}
+```
+
+Another case we have to consider is that in JS, braces aren't necessary for single expressions, so more complex recovery behavior is required for:
+
+```js
+while (a > 5]
+  console.log("Hello World");
+```
+
+For example, here there is an incorrect parenthesis closing the conditional, which, again, could naively emit `Unexpected ']'` and parse the `console.log` as a separate statement. Again, we can do better, but this time with `#[recover_skip(STOP,..)]`, which will keep skipping tokens until the given field matches or one of the given stop tokens is reached (at which point it gives up).
+
+```rust
+#[derive(Syntax)]
+struct WhileStatement {
+  #[token(While)]
+  kw_while: Token,
+  #[token(LParen)]
+  #[required]
+  _lparen: Option<Token>,
+  cond: Expression,
+  #[token(RParen)]
+
+  #[required(error = "Missing ')' in while statement")]
+  _rparen: Option<Token>,
+
+  #[recover_skip(RBrace, Semi)]
+  body: StatementOrBlock
+}
+```
+
