@@ -148,15 +148,15 @@ fn field_parse_fn(
       (
         (field_ident.clone(), ident.clone()),
         quote! {
-          println!("Parsing field {}", stringify!(#field_ident));
+          // println!("Parsing field {}", stringify!(#field_ident));
           let #field_ident : #ty = match #field_parser {
             Ok(res) => __res.merge(res),
             Err(e) => {
-              println!(
-                "Aborting {} on field {}",
-                stringify!(#struct_ident #(:: #variant_ident)*),
-                stringify!(#field_ident)
-              );
+              // println!(
+              //   "Aborting {} on field {}",
+              //   stringify!(#struct_ident #(:: #variant_ident)*),
+              //   stringify!(#field_ident)
+              // );
               return match __res.1 {
                 Some(e2) => Err(e.merge(e2)#label),
                 None => Err(e #label)
@@ -200,11 +200,11 @@ fn field_parse_fn(
     {
       let mut __res = ::derive_parser::Success((), None);
       let __label_start = input.save();
-      println!(
-        "Trying {} from {:?}",
-        stringify!(#struct_ident #(:: #variant_ident1)*),
-        input.save()
-      );
+      // println!(
+      //   "Trying {} from {:?}",
+      //   stringify!(#struct_ident #(:: #variant_ident1)*),
+      //   input.save()
+      // );
       #(#steps)*
       // println!("Aggregate error in {}: {:?}", stringify!(#struct_ident), &__res.1);
       Ok(__res.map(|_| #struct_ident #(:: #variant_ident)* #field_assignments))
@@ -288,7 +288,7 @@ fn impl_parse_for_enum(
           let branch = #others(input);
           match branch {
             Err(e2) => 'e: {
-              println!("Branch {} fails at {:?}", stringify!(#others), input.save());
+              // println!("Branch {} fails at {:?}", stringify!(#others), input.save());
               let Some(e1) = err else { err = Some(e2); break 'e; };
               err = Some(e1.merge(e2));
             }
@@ -301,14 +301,14 @@ fn impl_parse_for_enum(
               let _ = r1.merge(r2);
               // Pacify the borrow checker
               res = Some(r1);
-              println!("BRANCH {} HAS SUCCEEDED UP TO {end:?}", stringify!(#others));
+              // println!("BRANCH {} HAS SUCCEEDED UP TO {end:?}", stringify!(#others));
               // res = Some(::derive_parser::Success(v, r1.1));
             }
           };
           input.reset(start);
           // println!("Branch error: {:?}", err);
         )*
-        println!("Aggregate Error in {}: {:?}", stringify!(#ident), err);
+        // println!("Aggregate Error in {}: {:?}", stringify!(#ident), err);
 
         // res.ok_or_else(|| err.unwrap()).map(|v| { input.reset(end.unwrap()); v })
         match res {
@@ -389,7 +389,7 @@ fn eoi_parser(_attr: &Attribute) -> proc_macro2::TokenStream {
   quote! {
     let position = input.save();
     match input.next() {
-      Some(tok) => {println!("expected EOI at {:?}", tok);Err(::derive_parser::Error {
+      Some(tok) => {Err(::derive_parser::Error {
         position,
         expected: ::std::collections::BTreeSet::from(["end of input".to_string()]),
         found: Some(tok),

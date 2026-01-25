@@ -205,6 +205,7 @@ pub enum Type<'i> {
 // FIXME: enum
 #[derive(Debug, Parse)]
 #[input(Token<'i>)]
+#[label("word")]
 pub struct Word<'i>(#[token(Ident)] pub Token<'i>);
 
 #[derive(Debug)]
@@ -241,7 +242,7 @@ fn main() {
   // "#;
   let source = r#"
 def add (int int -> int): ADD
-def foo (int): BAR
+def foo: (int): BAR
 
 type Point (int int)
 type MyOpt : Some (int)
