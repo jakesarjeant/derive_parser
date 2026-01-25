@@ -50,8 +50,8 @@ impl<N: Ord + Clone> Span for Range<N> {
   }
 }
 
-pub trait Input {
-  type Token: Token;
+pub trait Input: Debug {
+  type Token: Token + Debug;
   type Checkpoint: Copy + Ord + Debug;
 
   /// Returns the next token and advances the input
@@ -63,7 +63,7 @@ pub trait Input {
 }
 
 pub trait Parse {
-  type Token;
+  type Token: Debug;
   type Output;
 
   fn parse<I>(input: &mut I) -> Result<Success<Self::Output, I>, Error<I>>
@@ -72,7 +72,7 @@ pub trait Parse {
 }
 
 #[derive(Clone)]
-pub struct Success<O, I: Input>(pub O, pub Option<Error<I>>);
+pub struct Success<O, I: Input>(#[doc(hidden)] pub O, #[doc(hidden)] pub Option<Error<I>>);
 
 impl<O, I, T> Debug for Success<O, I>
 where
@@ -105,9 +105,13 @@ impl<O, I: Input> Success<O, I> {
 
   pub fn map<P, F>(self, fun: F) -> Success<P, I>
   where
-    F: Fn(O) -> P,
+    F: FnOnce(O) -> P,
   {
     Success(fun(self.0), self.1)
+  }
+
+  pub fn result(self) -> O {
+    self.0
   }
 }
 
@@ -137,11 +141,16 @@ where
   I: Input,
 {
   pub fn merge(mut self, other: Error<I>) -> Self {
+    let committed = self.committed || other.committed;
+    // println!("Merging:\n\t{:?} and\n\t{:?}\n", self, other);
     if self.position == other.position {
       self.expected.extend(other.expected.into_iter());
+      self.committed = committed;
       self
     } else {
-      std::cmp::max_by_key(self, other, |e| e.position)
+      let mut err = std::cmp::max_by_key(self, other, |e| e.position);
+      err.committed = committed;
+      err
     }
   }
 }
@@ -151,34 +160,27 @@ where
   I: Input,
 {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    let expected = if self.expected.len() > 1 {
-      let all_but_last = self.expected.iter().take(self.expected.len() - 1);
+    write!(f, "Expected ")?;
+    if self.expected.len() > 1 {
+      let mut all_but_last = self.expected.iter().take(self.expected.len() - 1);
 
-      let mut expected = all_but_last
-        .map(Cow::from)
-        .reduce(|mut a, s| {
-          a.to_mut().reserve(s.len() + 1);
-          a.to_mut().push_str(&s);
-          a.to_mut().push_str(", ");
-          a
-        })
-        .unwrap_or_default();
+      write!(f, "one of {}", all_but_last.next().unwrap())?;
 
-      write!(
-        expected.to_mut(),
-        " or {}",
-        self.expected.iter().last().unwrap()
-      )?;
+      for exp in all_but_last {
+        write!(f, ", {}", exp)?;
+      }
 
-      expected
+      write!(f, " or {}", self.expected.iter().last().unwrap())?;
+    } else if let Some(first) = self.expected.first() {
+      write!(f, "{first}")?;
     } else {
-      self.expected.first().map(Cow::from).unwrap_or_default()
+      write!(f, "end of input")?;
     };
 
     if let Some(found) = &self.found {
-      write!(f, "Expected {} but found {}", expected, found.kind())
+      write!(f, " but found {}", found.kind())
     } else {
-      write!(f, "Expected {} but found EOI", expected)
+      write!(f, " but found end of input")
     }
   }
 }

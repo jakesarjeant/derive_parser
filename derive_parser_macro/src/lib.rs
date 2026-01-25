@@ -1,9 +1,6 @@
-use proc_macro2::{Span, TokenStream};
+use proc_macro2::TokenStream;
 use quote::{ToTokens, format_ident, quote};
-use syn::{
-  AttrStyle, Attribute, Data, DataEnum, DataStruct, DeriveInput, Field, Fields, Ident, Meta,
-  MetaList, parse_macro_input,
-};
+use syn::{Attribute, Data, DataEnum, DataStruct, DeriveInput, Field, Fields, parse_macro_input};
 
 /// Derives a basic implementation of [`Token`](`derive_parser::Token`) for Tokens with no
 /// additional information or span. Returns `Self` from
@@ -21,7 +18,7 @@ pub fn token_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     impl #generics ::derive_parser::Token for #ident #generics {
       type Kind = Self;
       fn kind(&self) -> Self::Kind {
-        self
+        self.clone()
       }
       type Span = ();
       fn span(&self) -> Self::Span {
@@ -115,6 +112,9 @@ fn field_parse_fn(
     .map(|(j, f @ Field { ident, ty, .. })| {
       let field_parser = field_parse_expr(&f);
 
+      // FIXME: remove debug
+      let variant_ident = variant_ident.iter();
+
       let field_ident = format_ident!(
         "__field_{}",
         ident
@@ -125,7 +125,21 @@ fn field_parse_fn(
       (
         (field_ident.clone(), ident.clone()),
         quote! {
-          let #field_ident : #ty = #field_parser;
+          println!("Parsing field {}", stringify!(#field_ident));
+          let #field_ident : #ty = match #field_parser {
+            Ok(res) => __res.merge(res),
+            Err(e) => {
+              println!(
+                "Aborting {} on field {}",
+                stringify!(#struct_ident #(:: #variant_ident)*),
+                stringify!(#field_ident)
+              );
+              return match __res.1 {
+                Some(e2) => Err(e.merge(e2)),
+                None => Err(e)
+              }
+            }
+          };
         },
       )
     })
@@ -148,18 +162,28 @@ fn field_parse_fn(
     .then(|| generics.lifetimes())
     .into_iter()
     .flatten();
+  let variant_ident1 = variant_ident.iter();
   let variant_ident = variant_ident.iter();
 
   quote! {
-    fn #ident<#(#lifetimes,)* I>(input: &mut I)
-      -> Result<#struct_ident #generics, ::derive_parser::Error<I>>
+    fn #ident<#(#lifetimes,)* I>(input: &mut I) -> Result<
+      ::derive_parser::Success<#struct_ident #generics, I>,
+      ::derive_parser::Error<I>
+    >
     where
       I: ::derive_parser::Input<
         Token = <#struct_ident #generics as ::derive_parser::Parse>::Token
       >
     {
-      #( #steps )*
-      Ok(#struct_ident #(:: #variant_ident)* #field_assignments)
+      let mut __res = ::derive_parser::Success((), None);
+      println!(
+        "Trying {} from {:?}",
+        stringify!(#struct_ident #(:: #variant_ident1)*),
+        input.save()
+      );
+      #(#steps)*
+      // println!("Aggregate error in {}: {:?}", stringify!(#struct_ident), &__res.1);
+      Ok(__res.map(|_| #struct_ident #(:: #variant_ident)* #field_assignments))
     }
   }
 }
@@ -168,7 +192,7 @@ fn impl_parse_for_enum(
   ident: &syn::Ident,
   DataEnum { variants, .. }: &DataEnum,
   generics: &syn::Generics,
-  attrs: &Vec<Attribute>,
+  _attrs: &Vec<Attribute>,
 ) -> proc_macro2::TokenStream {
   let (parse_fns, parsers): (Vec<_>, Vec<_>) = variants
     .iter()
@@ -182,7 +206,7 @@ fn impl_parse_for_enum(
     .unzip();
 
   let mut parsers = parsers.iter();
-  let first = parsers.next();
+  // let first = parsers.next();
 
   let others = parsers.map(|p| {
     let lifetimes = generics.lifetimes();
@@ -192,7 +216,10 @@ fn impl_parse_for_enum(
   let lifetimes = generics.lifetimes();
 
   quote! {
-      fn parse<I>(input: &mut I) -> Result<Self, ::derive_parser::Error<I>>
+      fn parse<I>(input: &mut I) -> Result<
+        ::derive_parser::Success<Self, I>,
+        ::derive_parser::Error<I>
+      >
       where
         I: ::derive_parser::Input<Token = Self::Token>
       {
@@ -210,22 +237,64 @@ fn impl_parse_for_enum(
         )*
 
         // TODO: Pray that this is correct
-        let checkpoint = input.save();
-        let res = #first::<#(#lifetimes),*>(input);
+        // let checkpoint = input.save();
+        // let res = #first::<#(#lifetimes),*>(input);
+        // #(
+        //   let Err(err) = res else { return res; };
+        //   input.reset(checkpoint);
+        //   let res = #others(input)
+        //     .map_err(|e2| err.merge(e2))
+        //     .map(|mut res2| { res2.merge(res); res2 });
+        //   // if input.save() != checkpoint { return Err(err) };
+        // )*
+        //
+        let start = input.save();
+        let mut end = None;
+        // let res = #first::<#(#lifetimes),*>(input);
+        let mut err = None;
+        let mut res = None;
         #(
-          let Err(err) = res else { return res; };
-          input.reset(checkpoint);
-          let res = #others(input).map_err(|e2| err.merge(e2));
-          // if input.save() != checkpoint { return Err(err) };
+          let branch = #others(input);
+          match branch {
+            Err(e2) => 'e: {
+              println!("Branch {} fails at {:?}", stringify!(#others), input.save());
+              let Some(e1) = err else { err = Some(e2); break 'e; };
+              err = Some(e1.merge(e2));
+            }
+            Ok(r2) => 'o: {
+              let Some(mut r1) = res else {
+                res = Some(r2);
+                end = Some(input.save());
+                break 'o;
+              };
+              let _ = r1.merge(r2);
+              // Pacify the borrow checker
+              res = Some(r1);
+              println!("BRANCH {} HAS SUCCEEDED UP TO {end:?}", stringify!(#others));
+              // res = Some(::derive_parser::Success(v, r1.1));
+            }
+          };
+          input.reset(start);
+          // println!("Branch error: {:?}", err);
         )*
+        println!("Aggregate Error in {}: {:?}", stringify!(#ident), err);
 
+        // res.ok_or_else(|| err.unwrap()).map(|v| { input.reset(end.unwrap()); v })
         match res {
-          Ok(v) => Ok(v),
-          Err(mut e) => {
-            // e.committed = true;
-            Err(e)
-          }
+          Some(mut r) => {
+            input.reset(end.unwrap());
+            r.merge(::derive_parser::Success((), err));
+            Ok(r)
+          },
+          None => Err(err.unwrap())
         }
+        // match res {
+        //   Ok(v) => Ok(v),
+        //   Err(mut e) => {
+        //     // e.committed = true;
+        //     Err(e)
+        //   }
+        // }
       }
   }
 }
@@ -234,12 +303,12 @@ fn field_parse_expr(field @ Field { ty, .. }: &Field) -> TokenStream {
   let parser = attribute_parser(field)
     .map(|base_parser| {
       quote! {
-        <#ty as ::derive_parser::Combinator<_>>::apply(input, |input| #base_parser)?
+        <#ty as ::derive_parser::Combinator<_>>::apply(input, |input| #base_parser)
       }
     })
     .unwrap_or_else(|| {
       quote! {
-        <#ty>::parse(input)?
+        <#ty>::parse(input)
       }
     });
 
@@ -289,13 +358,13 @@ fn eoi_parser(_attr: &Attribute) -> proc_macro2::TokenStream {
   quote! {
     let position = input.save();
     match input.next() {
-      Some(tok) => Err(::derive_parser::Error {
+      Some(tok) => {println!("expected EOI at {:?}", tok);Err(::derive_parser::Error {
         position,
         expected: ::std::collections::BTreeSet::from(["end of input".to_string()]),
         found: Some(tok),
         committed: false,
-      }),
-      None => Ok(Default::default())
+      })},
+      None => Ok(::derive_parser::Success(Default::default(), None))
     }
   }
 }
@@ -309,8 +378,9 @@ fn token_parser(attr: &Attribute) -> proc_macro2::TokenStream {
   quote! {{
     let checkpoint = input.save();
     let tok = input.next();
-    if tok.as_ref().map(::derive_parser::Token::kind) == Some(#token_expr) { Ok(tok.unwrap()) }
-    else {
+    if tok.as_ref().map(::derive_parser::Token::kind) == Some(#token_expr) {
+      Ok(::derive_parser::Success::from(tok.unwrap()))
+    } else {
       input.reset(checkpoint);
       Err(::derive_parser::Error {
         position: input.save(),
@@ -322,6 +392,6 @@ fn token_parser(attr: &Attribute) -> proc_macro2::TokenStream {
   }}
 }
 
-fn select_parser(attr: &Attribute) -> proc_macro2::TokenStream {
+fn select_parser(_attr: &Attribute) -> proc_macro2::TokenStream {
   todo!()
 }

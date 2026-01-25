@@ -55,30 +55,30 @@ use crate::{Error, Input, Parse, Success, Token};
 pub trait Combinator<A>: Sized {
   // type Output;
 
-  fn apply<I, F>(input: &mut I, parser: F) -> Result<Self, Error<I>>
+  fn apply<I, F>(input: &mut I, parser: F) -> Result<Success<Self, I>, Error<I>>
   where
     I: Input,
-    F: FnMut(&mut I) -> Result<A, Error<I>>;
+    F: FnMut(&mut I) -> Result<Success<A, I>, Error<I>>;
 }
 
 impl<T> Combinator<T> for T
 where
   T: Token,
 {
-  fn apply<I, F>(input: &mut I, mut parser: F) -> Result<Self, Error<I>>
+  fn apply<I, F>(input: &mut I, mut parser: F) -> Result<Success<Self, I>, Error<I>>
   where
     I: Input,
-    F: FnMut(&mut I) -> Result<T, Error<I>>,
+    F: FnMut(&mut I) -> Result<Success<Self, I>, Error<I>>,
   {
     parser(input)
   }
 }
 
 impl Combinator<()> for () {
-  fn apply<I, F>(input: &mut I, mut parser: F) -> Result<Self, Error<I>>
+  fn apply<I, F>(input: &mut I, mut parser: F) -> Result<Success<Self, I>, Error<I>>
   where
     I: Input,
-    F: FnMut(&mut I) -> Result<(), Error<I>>,
+    F: FnMut(&mut I) -> Result<Success<(), I>, Error<I>>,
   {
     parser(input)
   }
@@ -124,12 +124,20 @@ where
   where
     I: Input<Token = Self::Token>,
   {
-    let checkpoint = input.save();
-    if let Ok(res) = P::parse(input) {
-      Ok(res.map(Some))
-    } else {
-      input.reset(checkpoint);
-      Ok(None.into())
+    let chk = input.save();
+    match P::parse(input) {
+      Ok(res) => Ok(res.map(Some)),
+      Err(err) => {
+        input.reset(chk);
+        Ok(Success(None, Some(err)))
+
+        // if err.committed || input.save() != chk {
+        //   // Input was advanced = consuming failure
+        //   return Err(err);
+        // } else {
+        //   Ok(Success(None, Some(err)))
+        // }
+      }
     }
   }
 }
@@ -164,17 +172,17 @@ impl<T, U> Combinator<U> for Option<T>
 where
   T: Combinator<U>,
 {
-  fn apply<I, F>(input: &mut I, parser: F) -> Result<Self, Error<I>>
+  fn apply<I, F>(input: &mut I, parser: F) -> Result<Success<Self, I>, Error<I>>
   where
     I: Input,
-    F: FnMut(&mut I) -> Result<U, Error<I>>,
+    F: FnMut(&mut I) -> Result<Success<U, I>, Error<I>>,
   {
     let checkpoint = input.save();
     if let Ok(res) = T::apply(input, parser) {
-      Ok(Some(res))
+      Ok(res.map(Some))
     } else {
       input.reset(checkpoint);
-      Ok(None)
+      Ok(None.into())
     }
   }
 }
@@ -186,8 +194,6 @@ where
   type Token = P::Token;
   type Output = Vec<P::Output>;
 
-  // TODO: Pass up the last error even in the success case as a hint so that "expected" can be more
-  // accurate if no other branch wants the next token either. Also applies to option.
   fn parse<I>(input: &mut I) -> Result<Success<Self::Output, I>, Error<I>>
   where
     I: Input<Token = Self::Token>,
@@ -202,10 +208,15 @@ where
           chk = input.save();
         }
         Err(err) => {
+          println!("Failing: {:?} at {:?}", err, input.save());
           if err.committed || input.save() != chk {
             // Input was advanced = consuming failure
-            return Err(err);
+            return Err(match result.1 {
+              None => err,
+              Some(e) => err.merge(e),
+            });
           } else {
+            result.merge(Success((), Some(err)));
             break;
           }
         }
@@ -220,17 +231,44 @@ impl<T, U> Combinator<U> for Vec<T>
 where
   T: Combinator<U>,
 {
-  fn apply<I, F>(input: &mut I, mut parser: F) -> Result<Self, Error<I>>
+  fn apply<I, F>(input: &mut I, mut parser: F) -> Result<Success<Self, I>, Error<I>>
   where
     I: Input,
-    F: FnMut(&mut I) -> Result<U, Error<I>>,
+    F: FnMut(&mut I) -> Result<Success<U, I>, Error<I>>,
   {
-    let mut result = vec![];
+    // let mut result = Success::from(vec![]);
+    // let mut chk = input.save();
+    // while let Ok(next_res) = T::apply(input, &mut parser) {
+    //   let next_item = result.merge(next_res);
+    //   result.0.push(next_item);
+    //   chk = input.save();
+    // }
+    // input.reset(chk);
+    // Ok(result)
+
+    let mut result = Success::from(vec![]);
     let mut chk = input.save();
-    while let Ok(next_item) = T::apply(input, &mut parser) {
-      println!("position: {chk:?}");
-      result.push(next_item);
-      chk = input.save();
+    loop {
+      match T::apply(input, &mut parser) {
+        Ok(next_res) => {
+          let next_item = result.merge(next_res);
+          result.0.push(next_item);
+          chk = input.save();
+        }
+        Err(err) => {
+          println!("Failing: {:?} at {:?}", err, input.save());
+          if err.committed || input.save() != chk {
+            // Input was advanced = consuming failure
+            return Err(match result.1 {
+              None => err,
+              Some(e) => err.merge(e),
+            });
+          } else {
+            result.merge(Success((), Some(err)));
+            break;
+          }
+        }
+      }
     }
     input.reset(chk);
     Ok(result)

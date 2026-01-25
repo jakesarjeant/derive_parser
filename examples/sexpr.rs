@@ -43,7 +43,7 @@ pub struct SExpr {
   _lparen: Token,
   // #[token(Ident)]
   // elements: Vec<Option<Token>>,
-  elements: Vec<Option<Id>>,
+  elements: Vec<Id>,
   // elements: Vec<SExpr>,
   #[token(RParen)]
   _rparen: Token,
@@ -91,8 +91,11 @@ impl Input for VecInput {
 
 fn main() {
   println!(
-    "{:?}",
-    SExpr::parse(&mut VecInput(vec![Token::LParen, Token::RParen], 0))
-      .map_err(|err| format!("{err}"))
+    "{:#?}",
+    SExpr::parse(&mut VecInput(
+      vec![Token::LParen, Token::Ident, Token::Ident, Token::RParen],
+      0
+    ))
+    .map_err(|err| format!("{err}"))
   )
 }

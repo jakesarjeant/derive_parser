@@ -3,6 +3,7 @@ use std::{
   ops::Range,
 };
 
+use ariadne::{Color, Label, Report, ReportKind, Source};
 use derive_parser::{Input, Parse};
 use logos::Logos;
 
@@ -100,7 +101,7 @@ pub struct Syntax<'i> {
 #[input(Token<'i>)]
 pub enum Item<'i> {
   // Use(),
-  TypeItem(TypeItem<'i>),
+  Type(TypeItem<'i>),
   Def(DefItem<'i>),
 }
 
@@ -117,8 +118,8 @@ pub struct TypeItem<'i> {
 #[derive(Debug, Parse)]
 #[input(Token<'i>)]
 pub enum TypeVariants<'i> {
-  Sum(TyAnnotation<'i>),
-  Product(Vec<TypeVariant<'i>>),
+  Product(TyAnnotation<'i>),
+  Sum(Vec<TypeVariant<'i>>),
 }
 
 #[derive(Debug, Parse)]
@@ -128,7 +129,7 @@ pub struct TypeVariant<'i> {
   pub _col: Token<'i>,
   #[token(Ident)]
   pub name: Token<'i>,
-  pub ty: TyAnnotation<'i>,
+  pub ty: Option<TyAnnotation<'i>>,
 }
 
 #[derive(Debug, Parse)]
@@ -148,7 +149,6 @@ pub struct DefItem<'i> {
 #[input(Token<'i>)]
 pub enum TyAnnotation<'i> {
   /// Multiple-type annotation like  (T1 T2 T3)
-  // FIXME: Should fall through on hitting an arrow
   Multi(StackType<'i>),
   /// Single function type annotation  (T1 T2 -> T3 T$)
   Fun(FunType<'i>),
@@ -157,6 +157,7 @@ pub enum TyAnnotation<'i> {
 #[derive(Debug, Parse)]
 #[input(Token<'i>)]
 pub struct StackType<'i> {
+  pub generics: Option<Generics<'i>>,
   #[token(LParen)]
   pub _lpar: Token<'i>,
   pub tys: Vec<Type<'i>>,
@@ -204,7 +205,7 @@ pub struct Word<'i>(#[token(Ident)] pub Token<'i>);
 
 #[derive(Debug)]
 struct VecInput<T>(Vec<T>, usize);
-impl<T: derive_parser::Token> Input for VecInput<T> {
+impl<T: derive_parser::Token + Debug> Input for VecInput<T> {
   type Token = T;
   type Checkpoint = usize;
 
@@ -224,32 +225,59 @@ impl<T: derive_parser::Token> Input for VecInput<T> {
 }
 
 fn main() {
+  //   let source = r#"
+  // def add (int int -> int): ADD
+  // def foo (int): BAR
+
+  // type Point(int int)
+  // type MyOpt : Some (int)
+  //            : None ()
+
+  // type Functions(a b)
+  // "#;
   let source = r#"
 def add (int int -> int): ADD
 def foo (int): BAR
 
 type Point(int int)
-type MyOpt : Some (int)
-           : None ()
+type MyOpt  Some (int)
+           : None
 
-type Functions(a b :)
+type Functions[a b c]([s](a s -> b) (b -> c))
 "#;
 
-  println!(
-    "{:#?}",
-    Syntax::parse(&mut VecInput(
-      TokenKind::lexer(source)
-        .spanned()
-        .map(|(tok, span)| tok.map(|tok| {
-          Token {
-            kind: tok,
-            span: span.clone(),
-            text: &source[span],
-          }
-        }))
-        .collect::<Result<_, _>>()
-        .unwrap(),
-      0
-    )) // .map_err(|err| format!("{err}"))
-  )
+  match Syntax::parse(&mut VecInput(
+    TokenKind::lexer(source)
+      .spanned()
+      .map(|(tok, span)| {
+        tok.map(|tok| Token {
+          kind: tok,
+          span: span.clone(),
+          text: &source[span],
+        })
+      })
+      .collect::<Result<_, _>>()
+      .unwrap(),
+    0,
+  )) {
+    Ok(res) => println!("{:#?}", res.result()),
+    Err(err) => {
+      let span = err
+        .found
+        .as_ref()
+        .map(|t| t.span.clone())
+        .unwrap_or(source.len()..source.len());
+      Report::build(ReportKind::Error, ("<source>", span.clone()))
+        .with_code(1)
+        .with_message(format!("{err}"))
+        .with_label(
+          Label::new(("<source>", span))
+            .with_color(Color::Red)
+            .with_message(format!("{err}")),
+        )
+        .finish()
+        .eprint(("<source>", Source::from(source)))
+        .unwrap();
+    }
+  }
 }
