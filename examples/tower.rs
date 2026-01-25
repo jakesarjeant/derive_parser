@@ -107,6 +107,7 @@ pub enum Item<'i> {
 
 #[derive(Debug, Parse)]
 #[input(Token<'i>)]
+#[label("type definition")]
 pub struct TypeItem<'i> {
   #[token(Typ)]
   pub _type: Token<'i>,
@@ -124,6 +125,7 @@ pub enum TypeVariants<'i> {
 
 #[derive(Debug, Parse)]
 #[input(Token<'i>)]
+#[label("variant")]
 pub struct TypeVariant<'i> {
   #[token(Colon)]
   pub _col: Token<'i>,
@@ -134,6 +136,7 @@ pub struct TypeVariant<'i> {
 
 #[derive(Debug, Parse)]
 #[input(Token<'i>)]
+#[label("word definition")]
 pub struct DefItem<'i> {
   #[token(Def)]
   pub _def: Token<'i>,
@@ -192,6 +195,7 @@ pub struct Generics<'i> {
 
 #[derive(Debug, Parse)]
 #[input(Token<'i>)]
+#[label("type")]
 pub enum Type<'i> {
   Name(#[token(Ident)] Token<'i>),
   Stack(StackType<'i>),
@@ -239,8 +243,8 @@ fn main() {
 def add (int int -> int): ADD
 def foo (int): BAR
 
-type Point(int int)
-type MyOpt  Some (int)
+type Point (int int)
+type MyOpt : Some (int)
            : None
 
 type Functions[a b c]([s](a s -> b) (b -> c))

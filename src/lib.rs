@@ -153,6 +153,14 @@ where
       err
     }
   }
+
+  pub fn label(mut self, label: String, pos: I::Checkpoint) -> Self {
+    if self.position <= pos {
+      self.expected.clear();
+      self.expected.insert(label);
+    }
+    self
+  }
 }
 
 impl<I> Display for Error<I>

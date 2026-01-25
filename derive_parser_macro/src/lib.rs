@@ -29,7 +29,10 @@ pub fn token_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
   .into()
 }
 
-#[proc_macro_derive(Parse, attributes(token, input, select, delimited, required, eoi))]
+#[proc_macro_derive(
+  Parse,
+  attributes(token, input, select, delimited, required, eoi, label)
+)]
 pub fn parse_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
   let ast = parse_macro_input!(input as DeriveInput);
 
@@ -46,9 +49,14 @@ fn impl_parse(
   }: &DeriveInput,
 ) -> TokenStream {
   let parse_fn = match data {
-    Data::Struct(DataStruct { fields, .. }) => {
-      field_parse_fn(fields, &format_ident!("parse"), &ident, generics, None)
-    }
+    Data::Struct(DataStruct { fields, .. }) => field_parse_fn(
+      fields,
+      &format_ident!("parse"),
+      &ident,
+      generics,
+      None,
+      attrs,
+    ),
     Data::Enum(data) => impl_parse_for_enum(ident, data, generics, attrs),
     Data::Union(_) => {
       return syn::Error::new_spanned(ident, "Cannot derive Syntax for union types")
@@ -105,7 +113,21 @@ fn field_parse_fn(
   struct_ident: &syn::Ident,
   generics: &syn::Generics,
   variant_ident: Option<&syn::Ident>,
+  attrs: &Vec<Attribute>,
 ) -> proc_macro2::TokenStream {
+  let label = attrs.iter().find_map(|a| {
+    a.path().is_ident("label").then(|| {
+      let value = a
+        .parse_args::<syn::LitStr>()
+        .map(|expr| expr.to_token_stream())
+        .unwrap_or_else(|err| err.to_compile_error());
+
+      quote! {
+        .label(#value.to_string(), __label_start)
+      }
+    })
+  });
+
   let (names, steps): (Vec<_>, Vec<_>) = fields
     .iter()
     .enumerate()
@@ -122,6 +144,7 @@ fn field_parse_fn(
           .map(|i| i.to_string())
           .unwrap_or(j.to_string())
       );
+
       (
         (field_ident.clone(), ident.clone()),
         quote! {
@@ -135,8 +158,8 @@ fn field_parse_fn(
                 stringify!(#field_ident)
               );
               return match __res.1 {
-                Some(e2) => Err(e.merge(e2)),
-                None => Err(e)
+                Some(e2) => Err(e.merge(e2)#label),
+                None => Err(e #label)
               }
             }
           };
@@ -176,6 +199,7 @@ fn field_parse_fn(
       >
     {
       let mut __res = ::derive_parser::Success((), None);
+      let __label_start = input.save();
       println!(
         "Trying {} from {:?}",
         stringify!(#struct_ident #(:: #variant_ident1)*),
@@ -192,14 +216,21 @@ fn impl_parse_for_enum(
   ident: &syn::Ident,
   DataEnum { variants, .. }: &DataEnum,
   generics: &syn::Generics,
-  _attrs: &Vec<Attribute>,
+  attrs: &Vec<Attribute>,
 ) -> proc_macro2::TokenStream {
   let (parse_fns, parsers): (Vec<_>, Vec<_>) = variants
     .iter()
     .map(|v| {
       let fn_ident = format_ident!("__parse_{}", v.ident);
       (
-        field_parse_fn(&v.fields, &fn_ident, ident, generics, Some(&v.ident)),
+        field_parse_fn(
+          &v.fields,
+          &fn_ident,
+          ident,
+          generics,
+          Some(&v.ident),
+          &v.attrs,
+        ),
         fn_ident,
       )
     })
