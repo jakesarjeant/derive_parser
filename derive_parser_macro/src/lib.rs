@@ -589,16 +589,16 @@ fn eoi_parser(_attr: &Attribute) -> proc_macro2::TokenStream {
 
 fn token_parser(attr: &Attribute) -> proc_macro2::TokenStream {
   let token_expr = attr
-    // .parse_args::<syn::Expr>()
-    .parse_args_with(syn::Pat::parse_multi)
+    .parse_args::<syn::Expr>()
+    // .parse_args_with(syn::Pat::parse_multi)
     .map(|expr| expr.to_token_stream())
     .unwrap_or_else(|err| err.to_compile_error());
 
   quote! {{
     let checkpoint = input.save();
     let tok = input.next();
-    // if tok.as_ref().map(::derive_parser::Token::kind) == Some(#token_expr) {
-    if tok.as_ref().map(::derive_parser::Token::kind).map(|k| matches!(k, #token_expr)).unwrap_or(false) {
+    if tok.as_ref().map(::derive_parser::Token::kind) == Some(#token_expr) {
+    // if tok.as_ref().map(::derive_parser::Token::kind).map(|k| matches!(k, #token_expr)).unwrap_or(false) {
       Ok(::derive_parser::Success::from(tok.unwrap()))
     } else {
       input.reset(checkpoint);
@@ -627,7 +627,7 @@ pub fn spanned_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
     ..
   } = parse_macro_input!(input as DeriveInput);
 
-  let (mut subst, new_generics, where_preds, for_ty, token_type) =
+  let (subst, new_generics, where_preds, for_ty, token_type) =
     input_attr(&ident, &generics, &attrs[..]);
 
   let mut requires_default = false;
