@@ -613,3 +613,124 @@ fn token_parser(attr: &Attribute) -> proc_macro2::TokenStream {
 fn select_parser(_attr: &Attribute) -> proc_macro2::TokenStream {
   todo!()
 }
+
+// TODO: Roll this into `derive(Parse)`?
+#[proc_macro_derive(Spanned, attributes(input, eoi))]
+pub fn spanned_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+  let DeriveInput {
+    ident,
+    generics,
+    attrs,
+    data,
+    ..
+  } = parse_macro_input!(input as DeriveInput);
+
+  let (mut subst, new_generics, where_preds, for_ty, token_type) =
+    input_attr(&ident, &generics, &attrs[..]);
+
+  let mut requires_default = false;
+  let span_ty: syn::Type = parse_quote!(<#token_type as ::derive_parser::Spanned>::Span);
+
+  let body = match data {
+    Data::Union(_) => unimplemented!("Unions are not supported"),
+    Data::Enum(enum_data) => {
+      let arms = enum_data
+        .variants
+        .iter()
+        .map(|Variant { ident, fields, .. }| {
+          let body = span_for_fields(&mut requires_default, span_ty.clone(), fields);
+          let fields = expand_fields(fields);
+          quote! {
+            Self::#ident #fields => {
+              #body
+              span
+            }
+          }
+        });
+
+      quote! {
+        let span = match &self {
+          #(#arms),*
+        };
+      }
+    }
+    Data::Struct(DataStruct { fields, .. }) => {
+      let body = span_for_fields(&mut requires_default, span_ty.clone(), &fields);
+      let fields = expand_fields(&fields);
+      quote! {
+        let Self #fields = self;
+        #body
+      }
+    }
+  };
+
+  fn expand_fields(fields: &Fields) -> proc_macro2::TokenStream {
+    let names = fields.iter().map(|f| f.ident.clone());
+    match fields {
+      Fields::Unnamed(_) => {
+        let names = (0..fields.len()).map(|i| format_ident!("i{i}"));
+        quote! { ( #(#names),* ) }
+      }
+      Fields::Named(_) => {
+        quote! { {#(#names),*} }
+      }
+      Fields::Unit => quote! { () },
+    }
+  }
+
+  fn span_for_fields(
+    requires_default: &mut bool,
+    span_ty: syn::Type,
+    fields: &Fields,
+  ) -> proc_macro2::TokenStream {
+    if fields.len() == 0 {
+      *requires_default = true;
+      return quote! {
+        let span = #span_ty::default();
+      };
+    }
+
+    let mut fields = fields
+      .iter()
+      .enumerate()
+      // Filter out #[eoi] fields (their type is (), which doesn't implement Spanned)
+      .filter(|(_, Field { attrs, .. })| !attrs.iter().any(|attr| attr.path().is_ident("eoi")));
+    let first = fields.next().map(|(i, Field { ident, .. })| {
+      let ident = ident.clone().unwrap_or_else(|| format_ident!("i{i}"));
+      quote! {
+        let span = ::derive_parser::Spanned::span(#ident);
+      }
+    });
+
+    let rest = fields.map(|(i, Field { ident, .. })| {
+      let ident = ident.clone().unwrap_or_else(|| format_ident!("i{i}"));
+      quote! {
+        let span = ::derive_parser::Span::enclose(&#ident.span(), &span);
+      }
+    });
+
+    quote! {
+      #first
+      #(#rest)*
+    }
+    .into()
+  }
+
+  let default_constraint = requires_default.then(|| quote! { #span_ty: Default, });
+
+  quote! {
+    impl #new_generics ::derive_parser::Spanned for #for_ty
+    where
+      #token_type: ::derive_parser::Spanned,
+      #default_constraint
+      #(#where_preds),*
+    {
+      type Span = <#token_type as ::derive_parser::Spanned>::Span;
+      fn span(&self) -> Self::Span {
+        #body
+        span
+      }
+    }
+  }
+  .into()
+}

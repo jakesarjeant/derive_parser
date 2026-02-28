@@ -5,6 +5,8 @@ edition = "2024"
 
 [dependencies]
 derive_parser_macro = { path = "derive_parser_macro" }
+tower-hash = { path = "../tower3/hash" }
+variadics_please = "1.1.0"
 thiserror = "2.0.17"
 
 [workspace]
