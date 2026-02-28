@@ -14,11 +14,10 @@ pub enum Token {
   #[token(")")]
   RParen,
 
-  #[token("<")]
-  LTri,
-
-  #[regex("[a-zA-Z]+")]
+  #[regex("[a-zA-Z>+-]+")]
   Ident,
+  #[regex("[0-9]+(\\.[0-9]+)?")]
+  Number,
 }
 
 impl Display for Token {
@@ -26,8 +25,8 @@ impl Display for Token {
     match self {
       Token::Error => write!(f, "error"),
       Token::LParen => write!(f, "'('"),
-      Token::LTri => write!(f, "'<'"),
       Token::RParen => write!(f, "')'"),
+      Token::Number => write!(f, "number"),
       Token::Ident => write!(f, "identifier"),
     }
   }
@@ -38,35 +37,20 @@ use Token::*;
 #[derive(Debug, Parse)]
 #[input(Token)]
 pub struct SExpr {
-  // open: Open,
   #[token(LParen)]
-  _lparen: Token,
-  // #[token(Ident)]
-  // elements: Vec<Option<Token>>,
-  elements: Vec<Id>,
-  // elements: Vec<SExpr>,
+  pub _lparen: Token,
+  pub elements: Vec<Value>,
   #[token(RParen)]
-  _rparen: Token,
+  pub _rparen: Token,
 }
 
 #[derive(Debug, Parse)]
 #[input(Token)]
-pub struct Id {
-  #[token(Ident)]
-  _id: Token,
+pub enum Value {
+  Symbol(#[token(Ident)] Token),
+  Number(#[token(Number)] Token),
+  Expr(Box<SExpr>),
 }
-
-#[derive(Debug, Parse)]
-#[input(Token)]
-pub struct Open {
-  #[token(LTri)]
-  #[token(LParen)]
-  _lparen: Token,
-}
-
-// #[derive(Debug, Parse)]
-// #[input(Token)]
-// pub struct Name(#[token(Ident)] Token);
 
 #[derive(Debug)]
 struct VecInput(Vec<Token>, usize);
@@ -90,12 +74,18 @@ impl Input for VecInput {
 }
 
 fn main() {
-  println!(
-    "{:#?}",
-    SExpr::parse(&mut VecInput(
-      vec![Token::LParen, Token::Ident, Token::Ident, Token::RParen],
-      0
-    ))
-    .map_err(|err| format!("{err}"))
-  )
+  let input = r#"(define (fib n)
+                   (if (> 1 n)
+                       (+ (fib (- n 1) (- n 2)))
+                     n))"#;
+  let tokens = Token::lexer(input).collect::<Result<Vec<_>, _>>().unwrap();
+
+  let result = SExpr::parse(&mut VecInput(tokens, 0));
+
+  match result {
+    Ok(res) => println!("{:#?}", res.result()),
+    Err(err) => {
+      eprintln!("{}", err)
+    }
+  }
 }
