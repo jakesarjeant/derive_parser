@@ -99,114 +99,68 @@ pub struct Syntax<'i> {
 
 #[derive(Debug, Parse)]
 #[input(Token<'i>)]
-pub enum Item<'i> {
-  // Use(),
-  Type(TypeItem<'i>),
-  Def(DefItem<'i>),
-}
-
-#[derive(Debug, Parse)]
-#[input(Token<'i>)]
-#[label("type definition")]
-pub struct TypeItem<'i> {
+pub struct Item<'i> {
   #[token(Typ)]
-  pub _type: Token<'i>,
+  _type: Token<'i>,
   #[token(Ident)]
-  pub name: Token<'i>,
-  pub variants: TypeVariants<'i>,
+  name: Token<'i>,
+  typ: TypeVariants<'i>,
 }
 
 #[derive(Debug, Parse)]
 #[input(Token<'i>)]
 pub enum TypeVariants<'i> {
-  Product(TyAnnotation<'i>),
+  Product(TypeAnnotation<'i>),
   Sum(Vec<TypeVariant<'i>>),
 }
 
 #[derive(Debug, Parse)]
 #[input(Token<'i>)]
-#[label("variant")]
 pub struct TypeVariant<'i> {
   #[token(Colon)]
-  pub _col: Token<'i>,
+  _col: Token<'i>,
   #[token(Ident)]
-  pub name: Token<'i>,
-  pub ty: Option<TyAnnotation<'i>>,
+  name: Token<'i>,
+  typ: TypeAnnotation<'i>,
 }
 
 #[derive(Debug, Parse)]
 #[input(Token<'i>)]
-#[label("word definition")]
-pub struct DefItem<'i> {
-  #[token(Def)]
-  pub _def: Token<'i>,
-  #[token(Ident)]
-  pub name: Token<'i>,
-  pub ty: TyAnnotation<'i>,
-  #[token(Colon)]
-  pub _col: Token<'i>,
-  pub word: Word<'i>,
-}
-
-#[derive(Debug, Parse)]
-#[input(Token<'i>)]
-pub enum TyAnnotation<'i> {
-  /// Multiple-type annotation like  (T1 T2 T3)
-  Multi(StackType<'i>),
-  /// Single function type annotation  (T1 T2 -> T3 T$)
+pub enum TypeAnnotation<'i> {
+  Stack(StackType<'i>),
   Fun(FunType<'i>),
 }
 
 #[derive(Debug, Parse)]
 #[input(Token<'i>)]
 pub struct StackType<'i> {
-  pub generics: Option<Generics<'i>>,
   #[token(LParen)]
-  pub _lpar: Token<'i>,
-  pub tys: Vec<Type<'i>>,
+  _lpar: Token<'i>,
+  tys: Vec<Type<'i>>,
   #[token(RParen)]
-  pub _rpar: Token<'i>,
+  _rpar: Token<'i>,
 }
 
 #[derive(Debug, Parse)]
 #[input(Token<'i>)]
 pub struct FunType<'i> {
-  pub generics: Option<Generics<'i>>,
   #[token(LParen)]
-  pub _lpar: Token<'i>,
-  pub lhs: Vec<Type<'i>>,
+  _lpar: Token<'i>,
+  lhs: Vec<Type<'i>>,
   #[token(Arrow)]
-  pub _arrow: Token<'i>,
-  pub rhs: Vec<Type<'i>>,
+  _arrow: Token<'i>,
+  rhs: Vec<Type<'i>>,
   #[token(RParen)]
-  pub _rpar: Token<'i>,
+  _rpar: Token<'i>,
 }
 
 #[derive(Debug, Parse)]
 #[input(Token<'i>)]
-pub struct Generics<'i> {
-  #[token(LBrack)]
-  pub _lbrack: Token<'i>,
-  #[token(Ident)]
-  pub params: Vec<Token<'i>>,
-  #[token(RBrack)]
-  pub _rbrack: Token<'i>,
-}
-
-#[derive(Debug, Parse)]
-#[input(Token<'i>)]
-#[label("type")]
 pub enum Type<'i> {
   Name(#[token(Ident)] Token<'i>),
   Stack(StackType<'i>),
   Fun(FunType<'i>),
 }
-
-// FIXME: enum
-#[derive(Debug, Parse)]
-#[input(Token<'i>)]
-#[label("word")]
-pub struct Word<'i>(#[token(Ident)] pub Token<'i>);
 
 #[derive(Debug)]
 struct VecInput<T>(Vec<T>, usize);
@@ -241,15 +195,8 @@ fn main() {
   // type Functions(a b)
   // "#;
   let source = r#"
-def add (int int -> int): ADD
-def foo (int): BAR
-
-type Point (int int)
-type MyOpt : Some (int)
-           : None
-
-type Functions[a b c]([s](a s -> b) (b -> c))
-"#;
+type Point (int)
+  "#;
 
   match Syntax::parse(&mut VecInput(
     TokenKind::lexer(source)
