@@ -2,58 +2,6 @@ use std::{ops::Deref, sync::Arc};
 
 use crate::{Error, Input, Parse, Span, Spanned, Success, Token};
 
-/// Trait for combinators that work together with `#[token]` and `#[select]`. The implementation is
-/// almost always very similar to the corresponding `Parse` implementation; the fact that both are
-/// needed is an unfortunate side effect of the lack of specialization support, as are many of this
-/// crate's problems.
-///
-/// **Note:** As of right now, combinators don't compose, so `#[token(..)] foo: Vec<Option<Token>>`
-/// won't work, but `foo: Vec<Option<SomeParser>>` will.
-///
-/// Every combinator should both implement this trait and have a custom implementation of `Parse`
-/// with the same behavior. The implementation for `Option` might give you an idea of how this
-/// should look:
-///
-/// ```
-/// impl<P> Parse for Option<P>
-/// where
-///   P: Parse,
-/// {
-///   type Token = P::Token;
-///   type Output = Option<P::Output>;
-///
-///   fn parse<I>(input: &mut I) -> Result<Self::Output, Error<I>>
-///   where
-///     I: Input<Token = Self::Token>,
-///   {
-///     let checkpoint = input.save();
-///     if let Ok(res) = P::parse(input) {
-///       Ok(Some(res))
-///     } else {
-///       input.reset(checkpoint);
-///       Ok(None)
-///     }
-///   }
-/// }
-///
-///
-/// impl<T> Combinator<T> for Option<T> {
-///   type Output = Option<T>;
-///   fn apply<I, F>(input: &mut I, mut parser: F) -> Result<Self::Output, Error<I>>
-///   where
-///     I: Input,
-///     F: FnMut(&mut I) -> Result<T, Error<I>>,
-///   {
-///     let checkpoint = input.save();
-///     if let Ok(res) = parser(input) {
-///       Ok(Some(res))
-///     } else {
-///       input.reset(checkpoint);
-///       Ok(None)
-///     }
-///   }
-/// }
-/// ```
 pub trait Combinator<A>: Sized {
   // type Output;
 

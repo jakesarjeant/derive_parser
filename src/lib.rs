@@ -102,7 +102,7 @@ pub trait Parse {
 impl<T: Debug> Parse for PhantomData<T> {
   type Token = T;
   type Output = Self;
-  fn parse<I>(input: &mut I) -> Result<Success<Self::Output, I>, Error<I>>
+  fn parse<I>(_input: &mut I) -> Result<Success<Self::Output, I>, Error<I>>
   where
     I: Input<Token = Self::Token>,
   {

@@ -1,15 +1,14 @@
 use std::fmt::Debug;
 
-use tower_hash::StableHash;
-
 use crate::{Parse, Span, Spanned, Success};
 
-#[derive(Clone, StableHash)]
+/// Parses a delimited list, accepting leading and trailing delimiters.
+#[derive(Clone)]
 pub struct Delimited<P, D> {
-  leading: Option<D>,
-  first: Option<P>,
-  rest: Vec<(D, P)>,
-  trailing: Option<D>,
+  pub leading: Option<D>,
+  pub first: Option<P>,
+  pub rest: Vec<(D, P)>,
+  pub trailing: Option<D>,
 }
 
 impl<P, D> Delimited<P, D> {
