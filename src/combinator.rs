@@ -187,6 +187,18 @@ where
   }
 }
 
+impl<T> Spanned for Option<T>
+where
+  T: Spanned,
+  T::Span: Default,
+{
+  type Span = T::Span;
+
+  fn span(&self) -> Self::Span {
+    self.as_ref().map(Spanned::span).unwrap_or_default()
+  }
+}
+
 impl<P> Parse for Vec<P>
 where
   P: Parse,
@@ -272,5 +284,19 @@ where
     }
     input.reset(chk);
     Ok(result)
+  }
+}
+
+impl<T> Spanned for Vec<T>
+where
+  T: Spanned,
+  T::Span: Default,
+{
+  type Span = T::Span;
+
+  fn span(&self) -> Self::Span {
+    let first = self.first().map(Spanned::span).unwrap_or_default();
+    let last = self.last().map(Spanned::span).unwrap_or_default();
+    first.enclose(&last)
   }
 }

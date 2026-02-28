@@ -2,6 +2,7 @@ use std::{
   borrow::Cow,
   collections::BTreeSet,
   fmt::{Debug, Display, Write},
+  marker::PhantomData,
   ops::Range,
 };
 use thiserror::Error;
@@ -11,9 +12,11 @@ mod combinator;
 pub use combinator::Combinator;
 pub use derive_parser_macro::{Parse, Token};
 
-pub trait Token: Clone {
-  type Kind: Display;
+pub trait Token: Clone + Spanned {
+  type Kind: Display + PartialEq;
   fn kind(&self) -> Self::Kind;
+}
+pub trait Spanned {
   type Span: Span;
   fn span(&self) -> Self::Span;
 }
@@ -33,8 +36,15 @@ impl Span for () {
   }
 }
 
-impl<N: Ord + Clone> Span for Range<N> {
+impl<N: Ord + Default + Clone> Span for Range<N> {
   fn enclose(&self, other: &Self) -> Self {
+    // Exclude 0..0 ranges
+    if self == &Self::default() {
+      return other.clone();
+    } else if other == &Self::default() {
+      return self.clone();
+    }
+
     Range {
       start: (&self.start)
         .min(&self.end)
@@ -69,6 +79,17 @@ pub trait Parse {
   fn parse<I>(input: &mut I) -> Result<Success<Self::Output, I>, Error<I>>
   where
     I: Input<Token = Self::Token>;
+}
+
+impl<T: Debug> Parse for PhantomData<T> {
+  type Token = T;
+  type Output = Self;
+  fn parse<I>(input: &mut I) -> Result<Success<Self::Output, I>, Error<I>>
+  where
+    I: Input<Token = Self::Token>,
+  {
+    Ok(Success(PhantomData, None))
+  }
 }
 
 #[derive(Clone)]
@@ -122,7 +143,7 @@ impl<O, I: Input> From<O> for Success<O, I> {
 }
 
 // TODO: Add `Failure { Committed(Error), Uncommited(Error) }` and the `#[commit]` attribute.
-#[derive(Clone, Debug, Error)]
+#[derive(Debug, Error)]
 pub struct Error<I>
 where
   I: Input,
@@ -189,6 +210,20 @@ where
       write!(f, " but found {}", found.kind())
     } else {
       write!(f, " but found end of input")
+    }
+  }
+}
+
+impl<I> Clone for Error<I>
+where
+  I: Input,
+{
+  fn clone(&self) -> Self {
+    Error {
+      position: self.position.clone(),
+      expected: self.expected.clone(),
+      found: self.found.clone(),
+      committed: self.committed.clone(),
     }
   }
 }

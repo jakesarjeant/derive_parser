@@ -1,6 +1,13 @@
 use proc_macro2::TokenStream;
 use quote::{ToTokens, format_ident, quote};
-use syn::{Attribute, Data, DataEnum, DataStruct, DeriveInput, Field, Fields, parse_macro_input};
+use subst::SubstMap;
+use syn::{
+  Attribute, Data, DataEnum, DataStruct, DeriveInput, Field, Fields, TypeParam, Variant,
+  WherePredicate, parse::discouraged::Speculative, parse_macro_input, parse_quote,
+  punctuated::Punctuated,
+};
+
+mod subst;
 
 /// Derives a basic implementation of [`Token`](`derive_parser::Token`) for Tokens with no
 /// additional information or span. Returns `Self` from
@@ -20,6 +27,8 @@ pub fn token_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
       fn kind(&self) -> Self::Kind {
         self.clone()
       }
+    }
+    impl #generics ::derive_parser::Spanned for #ident #generics {
       type Span = ();
       fn span(&self) -> Self::Span {
         ()
@@ -39,6 +48,103 @@ pub fn parse_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
   impl_parse(&ast).into()
 }
 
+struct InputArgs {
+  ty: syn::Type,
+  for_ty: Option<syn::Type>,
+  where_clause: Option<ExtWhere>,
+}
+
+impl syn::parse::Parse for InputArgs {
+  fn parse(input: syn::parse::ParseStream) -> syn::parse::Result<Self> {
+    let ty: syn::Type = input.parse()?;
+    let for_ty: Option<syn::Type> = input.parse().map(|f: ForClause| f.ty).ok();
+    let where_clause: Option<ExtWhere> = input.parse().ok();
+    Ok(InputArgs {
+      ty,
+      for_ty,
+      where_clause,
+    })
+  }
+}
+
+struct ForClause {
+  _kw: syn::Token![for],
+  ty: syn::Type,
+}
+
+impl syn::parse::Parse for ForClause {
+  fn parse(input: syn::parse::ParseStream) -> syn::parse::Result<Self> {
+    let kw = input.parse()?;
+    let ty = input.parse()?;
+    Ok(ForClause { _kw: kw, ty })
+  }
+}
+
+struct ExtWhere {
+  _kw: syn::Token![where],
+  predicates: Punctuated<WherePred, syn::Token![,]>,
+}
+
+impl syn::parse::Parse for ExtWhere {
+  fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+    let kw = input.parse()?;
+    let mut predicates = Punctuated::new();
+    loop {
+      if input.is_empty()
+        || input.peek(syn::token::Brace)
+        || input.peek(syn::Token![,])
+        || input.peek(syn::Token![;])
+        || input.peek(syn::Token![:]) && !input.peek(syn::Token![::])
+        || input.peek(syn::Token![=])
+      {
+        break;
+      }
+      predicates.push_value(input.parse()?);
+      if !input.peek(syn::Token![,]) {
+        break;
+      }
+      predicates.push_punct(input.parse()?);
+    }
+    Ok(ExtWhere {
+      _kw: kw,
+      predicates,
+    })
+  }
+}
+
+enum WherePred {
+  Trait(syn::WherePredicate),
+  Eq(EqPred),
+}
+
+impl syn::parse::Parse for WherePred {
+  fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+    let fork = input.fork();
+    if let Ok(pred) = fork.parse() {
+      input.advance_to(&fork);
+      Ok(WherePred::Trait(pred))
+    } else {
+      let eq = input.parse()?;
+      Ok(WherePred::Eq(eq))
+    }
+  }
+}
+
+struct EqPred {
+  name: syn::Ident,
+  _eq: syn::Token![=],
+  ty: syn::Type,
+}
+
+impl syn::parse::Parse for EqPred {
+  fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+    let name = input.parse()?;
+    let eq = input.parse()?;
+    let ty = input.parse()?;
+    Ok(EqPred { name, _eq: eq, ty })
+  }
+}
+
 fn impl_parse(
   DeriveInput {
     ident,
@@ -48,43 +154,26 @@ fn impl_parse(
     ..
   }: &DeriveInput,
 ) -> TokenStream {
+  let (mut subst, new_generics, where_preds, for_ty, token_type) =
+    input_attr(&ident, &generics, &attrs[..]);
+
   let parse_fn = match data {
     Data::Struct(DataStruct { fields, .. }) => field_parse_fn(
       fields,
       &format_ident!("parse"),
       &ident,
+      &subst.substitute(parse_quote!(#ident #generics)),
       generics,
       None,
       attrs,
+      &mut subst,
     ),
-    Data::Enum(data) => impl_parse_for_enum(ident, data, generics, attrs),
+    Data::Enum(data) => impl_parse_for_enum(ident, data, generics, attrs, &mut subst),
     Data::Union(_) => {
       return syn::Error::new_spanned(ident, "Cannot derive Syntax for union types")
         .to_compile_error()
         .into();
     }
-  };
-
-  // FIXME: When specialization lands, we can `impl<T: Token> Parse for T { type Token = Self; }` and
-  // use that to derive the token type without an `#[input]` annotation
-  let mut input_attrs = attrs.iter().filter(|a| a.path().is_ident("input"));
-  let token_type = input_attrs
-    .next()
-    .map(|a| {
-      let ty = match a.parse_args::<syn::Type>() {
-        Ok(v) => v.to_token_stream(),
-        Err(v) => v.to_compile_error(),
-      };
-      quote! {type Token = #ty;}
-    })
-    .unwrap_or(
-      syn::Error::new_spanned(ident, "Must have an #[input] annotation").to_compile_error(),
-    );
-
-  let token_type = if let Some(attr) = input_attrs.next() {
-    syn::Error::new_spanned(attr, "Only one #[input] annotation is allowed").to_compile_error()
-  } else {
-    token_type
   };
 
   quote! {
@@ -98,22 +187,115 @@ fn impl_parse(
     // }
     #[allow(late_bound_lifetime_arguments)]
     #[automatically_derived]
-    impl #generics ::derive_parser::Parse for #ident #generics {
-      type Output = #ident #generics;
-      #token_type
+    impl #new_generics ::derive_parser::Parse for #for_ty
+    where
+      #token_type: ::derive_parser::Token,
+      #(#where_preds),*
+    {
+      type Output = #for_ty;
+      type Token = #token_type;
       #parse_fn
     }
   }
   .into()
 }
 
+fn input_attr(
+  ident: &syn::Ident,
+  generics: &syn::Generics,
+  attrs: &[Attribute],
+) -> (
+  SubstMap,
+  syn::Generics,
+  Vec<WherePredicate>,
+  syn::Type,
+  proc_macro2::TokenStream,
+) {
+  // FIXME: When specialization lands, we can `impl<T: Token> Parse for T { type Token = Self; }` and
+  // use that to derive the token type without an `#[input]` annotation
+  let mut input_attrs = attrs.iter().filter(|a| a.path().is_ident("input"));
+  let (token_type, for_ty, where_clause) = input_attrs
+    .next()
+    .map(|a| match a.parse_args::<InputArgs>() {
+      Ok(v) => (Ok(v.ty), v.for_ty, v.where_clause),
+      Err(v) => (Err(v), None, None),
+    })
+    .unwrap_or((
+      Err(syn::Error::new_spanned(
+        ident,
+        "Must have an #[input] annotation",
+      )),
+      None,
+      None,
+    ));
+
+  let token_type = if let Some(attr) = input_attrs.next() {
+    Err(syn::Error::new_spanned(
+      attr,
+      "Only one #[input] annotation is allowed",
+    ))
+  } else {
+    token_type
+  };
+
+  let for_generics = for_ty.as_ref().map(|ty| match ty {
+    syn::Type::Path(p) => {
+      // TODO: Error if more segments or qpath
+      if let syn::PathArguments::AngleBracketed(args) = &p.path.segments[0].arguments {
+        args.clone()
+      } else {
+        // TODO: Error
+        todo!()
+      }
+    }
+    // TODO: Emit Error
+    _ => todo!(),
+  });
+
+  let mut subst = for_generics
+    .map(|args| SubstMap::new(generics.clone(), args).unwrap_or_default())
+    .unwrap_or_default();
+  let where_preds = where_clause
+    .into_iter()
+    .flat_map(|w| w.predicates)
+    .filter_map(|pred| match pred {
+      WherePred::Trait(t) => Some(t),
+      WherePred::Eq(eq) => {
+        subst.insert(eq.name, eq.ty);
+        None
+      }
+    })
+    .collect::<Vec<_>>();
+
+  let token_type = match token_type {
+    Ok(ty) => subst.substitute(ty).to_token_stream(),
+    Err(err) => err.to_compile_error(),
+  };
+
+  let for_ty = subst.substitute(for_ty.unwrap_or_else(|| parse_quote!(#ident #generics)));
+
+  let mut new_generics = generics.clone();
+  new_generics.params = generics
+    .params
+    .pairs()
+    .filter_map(|p| match p.value() {
+      syn::GenericParam::Type(t) if subst.contains(&t.ident) => None,
+      _ => Some(p.cloned()),
+    })
+    .collect();
+
+  (subst, new_generics, where_preds, for_ty, token_type)
+}
+
 fn field_parse_fn(
   fields: &syn::Fields,
   ident: &syn::Ident,
   struct_ident: &syn::Ident,
+  struct_ty: &syn::Type,
   generics: &syn::Generics,
   variant_ident: Option<&syn::Ident>,
   attrs: &Vec<Attribute>,
+  subst: &mut SubstMap,
 ) -> proc_macro2::TokenStream {
   let label = attrs.iter().find_map(|a| {
     a.path().is_ident("label").then(|| {
@@ -132,7 +314,7 @@ fn field_parse_fn(
     .iter()
     .enumerate()
     .map(|(j, f @ Field { ident, ty, .. })| {
-      let field_parser = field_parse_expr(&f);
+      let field_parser = field_parse_expr(&f, subst);
 
       // FIXME: remove debug
       let variant_ident = variant_ident.iter();
@@ -144,6 +326,8 @@ fn field_parse_fn(
           .map(|i| i.to_string())
           .unwrap_or(j.to_string())
       );
+
+      let ty = subst.substitute(ty.clone());
 
       (
         (field_ident.clone(), ident.clone()),
@@ -185,17 +369,16 @@ fn field_parse_fn(
     .then(|| generics.lifetimes())
     .into_iter()
     .flatten();
-  let variant_ident1 = variant_ident.iter();
   let variant_ident = variant_ident.iter();
 
   quote! {
     fn #ident<#(#lifetimes,)* I>(input: &mut I) -> Result<
-      ::derive_parser::Success<#struct_ident #generics, I>,
+      ::derive_parser::Success<#struct_ty, I>,
       ::derive_parser::Error<I>
     >
     where
       I: ::derive_parser::Input<
-        Token = <#struct_ident #generics as ::derive_parser::Parse>::Token
+        Token = <#struct_ty as ::derive_parser::Parse>::Token
       >
     {
       let mut __res = ::derive_parser::Success((), None);
@@ -217,6 +400,7 @@ fn impl_parse_for_enum(
   DataEnum { variants, .. }: &DataEnum,
   generics: &syn::Generics,
   attrs: &Vec<Attribute>,
+  subst: &mut SubstMap,
 ) -> proc_macro2::TokenStream {
   let (parse_fns, parsers): (Vec<_>, Vec<_>) = variants
     .iter()
@@ -227,9 +411,11 @@ fn impl_parse_for_enum(
           &v.fields,
           &fn_ident,
           ident,
+          &subst.substitute(parse_quote!(#ident #generics)),
           generics,
           Some(&v.ident),
           &v.attrs,
+          subst,
         ),
         fn_ident,
       )
@@ -330,7 +516,8 @@ fn impl_parse_for_enum(
   }
 }
 
-fn field_parse_expr(field @ Field { ty, .. }: &Field) -> TokenStream {
+fn field_parse_expr(field @ Field { ty, .. }: &Field, subst: &mut SubstMap) -> TokenStream {
+  let ty = subst.substitute(ty.clone());
   let parser = attribute_parser(field)
     .map(|base_parser| {
       quote! {
