@@ -1,4 +1,6 @@
-use crate::{Error, Input, Parse, Success, Token};
+use std::{ops::Deref, sync::Arc};
+
+use crate::{Error, Input, Parse, Span, Spanned, Success, Token};
 
 /// Trait for combinators that work together with `#[token]` and `#[select]`. The implementation is
 /// almost always very similar to the corresponding `Parse` implementation; the fact that both are
@@ -81,6 +83,58 @@ impl Combinator<()> for () {
     F: FnMut(&mut I) -> Result<Success<(), I>, Error<I>>,
   {
     parser(input)
+  }
+}
+
+impl<P> Parse for Box<P>
+where
+  P: Parse,
+{
+  type Token = P::Token;
+  type Output = Box<P::Output>;
+
+  fn parse<I>(input: &mut I) -> Result<Success<Self::Output, I>, Error<I>>
+  where
+    I: Input<Token = Self::Token>,
+  {
+    P::parse(input).map(|res| res.map(Box::new))
+  }
+}
+
+impl<T> Spanned for Box<T>
+where
+  T: Spanned,
+{
+  type Span = T::Span;
+
+  fn span(&self) -> Self::Span {
+    self.deref().span()
+  }
+}
+
+impl<P> Parse for Arc<P>
+where
+  P: Parse,
+{
+  type Token = P::Token;
+  type Output = Arc<P::Output>;
+
+  fn parse<I>(input: &mut I) -> Result<Success<Self::Output, I>, Error<I>>
+  where
+    I: Input<Token = Self::Token>,
+  {
+    P::parse(input).map(|res| res.map(Arc::new))
+  }
+}
+
+impl<T> Spanned for Arc<T>
+where
+  T: Spanned,
+{
+  type Span = T::Span;
+
+  fn span(&self) -> Self::Span {
+    self.deref().span()
   }
 }
 
