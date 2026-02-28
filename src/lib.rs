@@ -8,9 +8,11 @@ use std::{
 use thiserror::Error;
 
 mod combinator;
+mod delimited;
 
 pub use combinator::Combinator;
-pub use derive_parser_macro::{Parse, Token};
+pub use delimited::Delimited;
+pub use derive_parser_macro::{Parse, Spanned, Token};
 
 pub trait Token: Clone + Spanned {
   type Kind: Display + PartialEq;
@@ -20,6 +22,22 @@ pub trait Spanned {
   type Span: Span;
   fn span(&self) -> Self::Span;
 }
+macro_rules! impl_spanned {
+  (($n0:tt, $t1:ident)$(, $(($n:tt, $tn:ident)),*)?) => {
+    impl<$t1$(, $($tn),*)?> Spanned for ($t1, $($($tn),*)?)
+    where
+      $t1: Spanned,
+      $($($tn: Spanned<Span = <$t1>::Span>),*)?
+    {
+      type Span = <$t1>::Span;
+      fn span(&self) -> Self::Span {
+        self.0.span()
+          $($(.enclose(&self.$n.span()))*)?
+      }
+    }
+  };
+}
+variadics_please::all_tuples_enumerated!(impl_spanned, 1, 16, T);
 
 pub trait Span {
   /// Return a new span that encloses both spans, i.e.
