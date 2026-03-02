@@ -22,6 +22,8 @@ This crate provides a derive macro, `#[derive(Parse)]` that derives a recursive 
 
 > [!IMPORTANT]
 > Disclaimer: I had an interesting idea and sketched out a proof-of-concept. As of right now, that's all this is. It works, mostly, but is in no way feature-complete or efficient. If people end up showing interest, I'll rewrite it from scratch with better design choices. For now, feel free to experiment, but don't expect feature or performance parity with existing parser generators. It's worth noting that the nature of derive macros imposes a limit on how efficient an approach like this can be, since it's not possible to globally collect definitions across structs and build e.g. an LR transition table.
+>
+> As of `v0.x`, there are NO semver guarantees; breaking changes may occur in any version.
 
 # Example
 
