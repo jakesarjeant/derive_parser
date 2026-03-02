@@ -31,20 +31,19 @@ use derive_parser::{Parse, Token};
 mod lexer;
 use lexer::TokenKind::*; // Implemented e.g. with Logos
 
-#[derive(Parse)]
+#[derive(Parse, Spanned)]
 #[input(Token)]
 struct FunctionCall {
     #[token(Ident)]
     name: Token,
     #[token(LParen)]
     _lparen: Token,
-    #[delimiter(Comma, allow_trailing = true)]
-    args: Vec<Expression>,
+    args: Delimited<Expression, Delim>,
     #[token(RParen)]
     _rparen: Token
 }
 
-#[derive(Parse)]
+#[derive(Parse, Spanned)]
 #[input(Token)]
 enum Expression {
     Call(FunctionCall),
@@ -53,6 +52,10 @@ enum Expression {
     #[token(String(_))]
     Literal(Token)
 }
+
+#[derive(Parse, Spanned)]
+#[input(Token)]
+struct Delim(#[token(Comma)])
 
 // Support stuff; we could've just implemented `Token` for `TokenKind`:
 
@@ -147,6 +150,50 @@ macro_rules! just {
 
 Even with all that, many of the convenience methods (like `.span()` on nodes) that `derive_parser` provides are still not implemented here, and I didn't even try to make this zero-copy due to the sheer amount of lifetime-juggling.
 </summary>
+</details>
+
+# Pratt Parsing
+
+Currently, `derive_parser` generates recursive descent parsers. This makes inherently left-recursive grammars like arithmetic expressions hard to represent. To solve this, a built-in pratt parser is provided:
+
+```rust
+use derive_parser::{Pratt, Precedence, Parse, Spanned};
+
+#[derive(Parse, Spanned)]
+#[input(Token)]
+enum Atom {
+  Paren(
+    #[token(LParen)] Token,
+    Box<Expression>
+    #[token(RParen)] Token,
+  ),
+  Number(#[token(Number)] Token)
+}
+
+#[derive(Parse, Spanned)]
+#[input(Token)]
+struct Expression(Pratt<Operator, Atom>);
+
+#[derive(Parse, Spanned, Precedence)]
+#[input(Token)]
+enum Operator {
+  // Infix Operators
+  #[pratt(1)]
+  Add(#[token(Plus)] Token),
+  #[pratt(2)]
+  Mul(#[token(Times)] Token),
+  
+  // Prefix Operators
+  #[pratt(prefix(4))]
+  Sub(#[token(Minus)] Token),
+  
+  // Postfix operators
+  #[pratt(postfix(3))]
+  Fac(#[token(Bang)] Token)
+}
+```
+
+This will parse an operator-precedence expression like `1 + 2 * 3 + 4 * -5!` as `(1 + (2 * 3)) + (4 * (-5)!)`.
 
 # Attributes
 
@@ -164,9 +211,9 @@ enum TokenKind {
   LParen,
   RParen
 }
-type Token = derive_parser::Token<TokenKind>;
 
-#[derive(Syntax)]
+#[derive(Parse)]
+#[input(Token)]
 struct Parens {
   // Match tokens containing a `TokenKind::LParen`
   #[token(TokenKind::LParen)]
@@ -183,7 +230,8 @@ It is common to `use TokenKind::*` in your parser module to avoid repetition. Yo
 // -- snip --
 use TokenKind::*;
 
-#[derive(Syntax)]
+#[derive(Parse)]
+#[input(Token)]
 struct Literal(
   #[token(Bool)]
   #[token(Int)]
@@ -192,13 +240,19 @@ struct Literal(
 );
 ```
 
+# Planned Features
+
+- [ ] Error recovery (`#[required]`, `#[recover]`)
+- [ ] Better `Delimited` API (`#[delimited]`)
+
 <!--
 ## `#[delimited(PATTERN[, allow_trailing = true])]`
 
 Parses into `Delimited<T, Token>`, capturing a sequence of `T` separated by tokens matching `PATTERN`:
 
 ```rust
-#[derive(Syntax)]
+#[derive(Parse)]
+#[input(Token)] 
 struct Args {
   #[token(LParen)]
   _lparen: Token,
