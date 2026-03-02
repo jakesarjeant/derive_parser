@@ -7,7 +7,13 @@ use syn::{
   punctuated::Punctuated,
 };
 
+mod pratt;
 mod subst;
+
+#[proc_macro_derive(Precedence, attributes(pratt))]
+pub fn pratt_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+  pratt::derive(parse_macro_input!(input as DeriveInput)).into()
+}
 
 /// Derives a basic implementation of [`Token`](`derive_parser::Token`) for Tokens with no
 /// additional information or span. Returns `Self` from
@@ -372,7 +378,7 @@ fn field_parse_fn(
   let variant_ident = variant_ident.iter();
 
   quote! {
-    fn #ident<#(#lifetimes,)* I>(input: &mut I) -> Result<
+    fn #ident<#(#lifetimes,)* I>(input: &mut I) -> ::core::result::Result<
       ::derive_parser::Success<#struct_ty, I>,
       ::derive_parser::Error<I>
     >
@@ -433,7 +439,7 @@ fn impl_parse_for_enum(
   let lifetimes = generics.lifetimes();
 
   quote! {
-      fn parse<I>(input: &mut I) -> Result<
+      fn parse<I>(input: &mut I) -> ::core::result::Result<
         ::derive_parser::Success<Self, I>,
         ::derive_parser::Error<I>
       >

@@ -17,3 +17,7 @@ members = [
 [dev-dependencies]
 logos = "0.15.1"
 ariadne = "0.6.0"
+rustyline = { version = "17.0.1", features = ["derive"] }
+anyhow = "1.0.102"
+crossterm = "0.29.0"
+derive_more = { version = "2.1.1", features = ["display"] }

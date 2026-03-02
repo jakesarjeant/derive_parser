@@ -1,16 +1,14 @@
 <div align="center">
   <h1>derive_parser</h1>
   <p>
-    <!-- TODO: Add links -->
-    <a href="https://docs.rs/">docs.rs</a> |
-    <a href="https://crates.io/crates/">crates.io</a> |
-    <a href="https://github.com/jakesarjeant/">github.com</a>
+    <a href="https://docs.rs/derive_parser">docs.rs</a> |
+    <a href="https://crates.io/crates/derive_parser">crates.io</a> |
+    <a href="https://github.com/jakesarjeant/derive_parser">github.com</a>
   </p>
   <p>
-  <!-- TODO: Badges -->
-  <!-- <img alt="License: BSD 3-clause" src="https://img.shields.io/github/license/jakesarjeant/macaroons?color=orange&style=for-the-badge" /> -->
-  <!-- <img alt="Latest release" src="https://img.shields.io/crates/v/rustmacaroon?color=yellow&style=for-the-badge" /> -->
-  <!-- <img alt="Github issue counter" src="https://img.shields.io/github/issues/jakesarjeant/macaroons?style=for-the-badge" /> -->
+  <img alt="License: BSD 3-clause" src="https://img.shields.io/github/license/jakesarjeant/derive_parser?color=orange&style=for-the-badge" />
+  <img alt="Latest release" src="https://img.shields.io/crates/v/derive_parser?color=yellow&style=for-the-badge" />
+  <img alt="Github issue counter" src="https://img.shields.io/github/issues/jakesarjeant/derive_parser?style=for-the-badge" />
   </p>
 </div>
 
@@ -20,56 +18,67 @@
 
 ---
 
+This crate provides a derive macro, `#[derive(Parse)]` that derives a recursive descent parser for a syntax tree node based on fields' `Parse` implementations as well as derive macros.
+
+> [!IMPORTANT]
+> Disclaimer: I had an interesting idea and sketched out a proof-of-concept. As of right now, that's all this is. It works, mostly, but is in no way feature-complete or efficient. If people end up showing interest, I'll rewrite it from scratch with better design choices. For now, feel free to experiment, but don't expect feature or performance parity with existing parser generators. It's worth noting that the nature of derive macros imposes a limit on how efficient an approach like this can be, since it's not possible to globally collect definitions across structs and build e.g. an LR transition table.
+
 # Example
 
 ```rust
 use derive_parser::{Parse, Token};
 
-use TokenKind::*; // Implemented e.g. with Logos
+mod lexer;
+use lexer::TokenKind::*; // Implemented e.g. with Logos
+
+#[derive(Parse)]
+#[input(Token)]
+struct FunctionCall {
+    #[token(Ident)]
+    name: Token,
+    #[token(LParen)]
+    _lparen: Token,
+    #[delimiter(Comma, allow_trailing = true)]
+    args: Vec<Expression>,
+    #[token(RParen)]
+    _rparen: Token
+}
+
+#[derive(Parse)]
+#[input(Token)]
+enum Expression {
+    Call(FunctionCall),
+    #[token(Bool)]
+    #[token(Int)]
+    #[token(String(_))]
+    Literal(Token)
+}
+
+// Support stuff; we could've just implemented `Token` for `TokenKind`:
 
 #[derive(Clone, Debug)]
 struct Token {
-  pub inner: TokenKind,
-  pub span: Span,
-  pub trailing_trivia: Option<String>,
-  pub string: String,
+    pub inner: lexer::TokenKind,
+    pub span: Span,
+    pub trailing_trivia: Option<String>,
+    pub string: String,
 }
 
 impl derive_parser::Token for Token {
-  type Kind = TokenKind;
-  fn kind(&self) -> Self::Kind {
-    self.inner
-  }
-
-  type Span = Span;
-  fn span(&self) -> Self::Span {
-    self.span
-  }
+    type Kind = TokenKind;
+    fn kind(&self) -> Self::Kind {
+        self.inner
+    }
 }
-
-#[derive(Parse)]
-struct FunctionCall {
-  #[token(Ident)]
-  name: Token,
-  #[token(LParen)]
-  _lparen: Token,
-  #[delimiter(Comma, allow_trailing = true)]
-  args: Vec<Expression>,
-  #[token(RParen)]
-  _rparen: Token
-}
-
-#[derive(Parse)]
-enum Expression {
-  Call(FunctionCall),
-  #[token(Bool)]
-  #[token(Int)]
-  #[token(String(_))]
-  Literal(Token)
+impl Spanned for Token {
+    type Span = Span;
+    fn span(&self) -> Self::Span {
+        self.span
+    }
 }
 ```
 
-By only annotating what can't be inferred from the syntax tree structs and deriving the rest of the parser implementation, `derive_parser` minimizes the amount of code needed to express your parser. In addition, this keeps your CST and parser implementations in sync, which should help you avoid bugs when updating your parser.
+By only annotating what can't be inferred from the syntax tree structs and deriving the rest of the parser implementation, `derive_parser` minimizes the amount of code needed to express your parser. In addition, this keeps your CST and parser implementations in sync, which should help you avoid bugs when updating your parser. The whole thing can be also be made zero-copy by just adding a lifetime paramter to `Token` and the node structs.
 
 <details>
 <summary>For comparison, here's the same parser written with chumsky:</summary>
@@ -77,71 +86,74 @@ By only annotating what can't be inferred from the syntax tree structs and deriv
 ```rust
 use chumsky::{Parser, recursive::Recursive};
 
-#[derive(Clone)]
-struct Token {
-  pub inner: TokenKind,
-  pub span: Span,
-  pub trailing_trivia: Option<String>,
-  pub string: String,
-}
-
-macro_rules! just {
-  ($kind:pat) => {
-    select! {
-      t @ Token { inner: $kind, .. } => t
-    }
-  };
-}
+mod lexer;
+use lexer::TokenKind; // Implemented e.g. with logos
 
 struct FunctionCall {
-  name: Token,
-  _lparen: Token,
-  args: Vec<Expression>,
-  _rparen: Token
+    name: Token,
+    _lparen: Token,
+    args: Vec<Expression>,
+    _rparen: Token
 }
 
 enum Expression {
-  Call(FunctionCall),
-  Literal(Token)
+    Call(FunctionCall),
+    Literal(Token)
 }
 
 fn parser<I>() -> impl Parser<I, FunctionCall, Simple<I>>
 where
-  I: Input<Token = Token, Span = SimpleSpan<usize, ()> + ValueInput
+    I: Input<Token = Token, Span = SimpleSpan<usize, ()> + ValueInput
 {
-  use TokenKind::*;
+    use TokenKind::*;
 
-  let mut expression = Recursive::declare();
+    let mut expression = Recursive::declare();
 
-  let function_call = just!(Ident)
-    .then(just!(LParen))
-    .then(expression.separated_by(just!(Comma)).allow_trailing)
-    .then(just!(RParen))
-    .map(|(((name, _lparen), args), _rparen)| {
-      FunctionCall { name, _lparen, args, _rparen }
-    });
+    let function_call = just!(Ident)
+        .then(just!(LParen))
+        .then(expression.separated_by(just!(Comma)).allow_trailing)
+        .then(just!(RParen))
+        .map(|(((name, _lparen), args), _rparen)| {
+            FunctionCall { name, _lparen, args, _rparen }
+        });
 
-  expression.define(
-    just!(Bool)
-      .map(Expression::Literal)
-      .or(just!(Int).map(Expression::Literal))
-      .or(just!(String(_)).map(Expression::Literal))
-      .or(function_call.clone())
-  );
+    expression.define(
+        just!(Bool)
+            .map(Expression::Literal)
+            .or(just!(Int).map(Expression::Literal))
+            .or(just!(String(_)).map(Expression::Literal))
+            .or(function_call.clone())
+    );
 
-  function_call
+    function_call
+}
+
+#[derive(Clone)]
+struct Token {
+    pub inner: TokenKind,
+    pub span: Span,
+    pub trailing_trivia: Option<String>,
+    pub string: String,
+}
+
+macro_rules! just {
+    ($kind:pat) => {
+        select! {
+            t @ Token { inner: $kind, .. } => t
+        }
+    };
 }
 ```
 
 Even with all that, many of the convenience methods (like `.span()` on nodes) that `derive_parser` provides are still not implemented here, and I didn't even try to make this zero-copy due to the sheer amount of lifetime-juggling.
-
 </summary>
 
 # Attributes
 
-If the right-hand side of a field implements `Syntax`, you don't need any attributes — the parser will automatically try to parse the field with its own `Syntax` implementation.
+If the right-hand side of a field implements `Parse`, you don't need any attributes — the parser will automatically try to parse the field with its own `Parse` implementation.
 
-Otherwise, you can use attributes to explain how to parse the field. You may use any number of the following attributes (you can have many of the same, too), so long as they all return the correct type for the field.
+<!-- Otherwise, you can use attributes to explain how to parse the field. You may use any number of the following attributes (you can have many of the same, too), so long as they all return the correct type for the field. -->
+Otherwise, you can use attributes to explain how to parse the field. Currently, the only attribute for this case is `#[token(...)]`.
 
 ## `#[token(PATTERN)]`
 
@@ -180,6 +192,7 @@ struct Literal(
 );
 ```
 
+<!--
 ## `#[delimited(PATTERN[, allow_trailing = true])]`
 
 Parses into `Delimited<T, Token>`, capturing a sequence of `T` separated by tokens matching `PATTERN`:
@@ -227,7 +240,8 @@ struct MaybeBool {
   value: Option<Token>
 }
 ```
-
+-->
+<!--
 # Error recovery
 
 When possible, the parser will try to recover from syntax errors. In many cases, this will require a bit of guidance. For example, consider the following invalid JavaScript expression:
@@ -287,4 +301,4 @@ struct WhileStatement {
   body: StatementOrBlock
 }
 ```
-
+-->

@@ -1,7 +1,6 @@
 use std::{
-  borrow::Cow,
   collections::BTreeSet,
-  fmt::{Debug, Display, Write},
+  fmt::{Debug, Display},
   marker::PhantomData,
   ops::Range,
 };
@@ -9,10 +8,12 @@ use thiserror::Error;
 
 mod combinator;
 mod delimited;
+mod pratt;
 
 pub use combinator::Combinator;
 pub use delimited::Delimited;
 pub use derive_parser_macro::{Parse, Spanned, Token};
+pub use pratt::{Pratt, Precedence};
 
 pub trait Token: Clone + Spanned {
   type Kind: Display + PartialEq;
