@@ -1,7 +1,13 @@
 [package]
 name = "derive_parser"
+description = "Derive a parser from your CST"
+repository = "https://github.com/jakesarjeant/derive_parser"
+readme = "README.md"
 version = "0.1.0"
 edition = "2024"
+license = "BSD-3-Clause"
+keywords = [ "parser", "parsing", "derive", "proc_macro", "syntax" ]
+categories = [ "parsing" ]
 
 [dependencies]
 derive_parser_macro = { path = "derive_parser_macro" }
