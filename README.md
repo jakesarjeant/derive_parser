@@ -6,7 +6,7 @@
     <a href="https://github.com/jakesarjeant/derive_parser">github.com</a>
   </p>
   <p>
-  <img alt="License: BSD 3-clause" src="https://img.shields.io/github/license/jakesarjeant/derive_parser?color=orange&style=for-the-badge" />
+  <img alt="License: BSD 3-clause" src="https://img.shields.io/github/license/jakesarjeant/derive_parser?style=for-the-badge&color=orange" />
   <img alt="Latest release" src="https://img.shields.io/crates/v/derive_parser?color=yellow&style=for-the-badge" />
   <img alt="Github issue counter" src="https://img.shields.io/github/issues/jakesarjeant/derive_parser?style=for-the-badge" />
   </p>
