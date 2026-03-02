@@ -1,9 +1,12 @@
 use std::fmt::Debug;
 
 use crate::{Parse, Span, Spanned, Success};
+#[cfg(feature = "serde")]
+use serde::Serialize;
 
 /// Parses a delimited list, accepting leading and trailing delimiters.
 #[derive(Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
 pub struct Delimited<P, D> {
   pub leading: Option<D>,
   pub first: Option<P>,
