@@ -2,9 +2,8 @@ use proc_macro2::TokenStream;
 use quote::{ToTokens, format_ident, quote};
 use subst::SubstMap;
 use syn::{
-  Attribute, Data, DataEnum, DataStruct, DeriveInput, Field, Fields, TypeParam, Variant,
-  WherePredicate, parse::discouraged::Speculative, parse_macro_input, parse_quote,
-  punctuated::Punctuated,
+  Attribute, Data, DataEnum, DataStruct, DeriveInput, Field, Fields, Variant, WherePredicate,
+  parse::discouraged::Speculative, parse_macro_input, parse_quote, punctuated::Punctuated,
 };
 
 mod pratt;
@@ -322,9 +321,6 @@ fn field_parse_fn(
     .map(|(j, f @ Field { ident, ty, .. })| {
       let field_parser = field_parse_expr(&f, subst);
 
-      // FIXME: remove debug
-      let variant_ident = variant_ident.iter();
-
       let field_ident = format_ident!(
         "__field_{}",
         ident
@@ -405,7 +401,7 @@ fn impl_parse_for_enum(
   ident: &syn::Ident,
   DataEnum { variants, .. }: &DataEnum,
   generics: &syn::Generics,
-  attrs: &Vec<Attribute>,
+  _attrs: &Vec<Attribute>,
   subst: &mut SubstMap,
 ) -> proc_macro2::TokenStream {
   let (parse_fns, parsers): (Vec<_>, Vec<_>) = variants
@@ -428,15 +424,12 @@ fn impl_parse_for_enum(
     })
     .unzip();
 
-  let mut parsers = parsers.iter();
-  // let first = parsers.next();
+  let parsers = parsers.iter();
 
   let others = parsers.map(|p| {
     let lifetimes = generics.lifetimes();
     quote! { #p::<#(#lifetimes),*> }
   });
-
-  let lifetimes = generics.lifetimes();
 
   quote! {
       fn parse<I>(input: &mut I) -> ::core::result::Result<
@@ -633,7 +626,7 @@ pub fn spanned_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
     ..
   } = parse_macro_input!(input as DeriveInput);
 
-  let (subst, new_generics, where_preds, for_ty, token_type) =
+  let (_subst, new_generics, where_preds, for_ty, token_type) =
     input_attr(&ident, &generics, &attrs[..]);
 
   let mut requires_default = false;

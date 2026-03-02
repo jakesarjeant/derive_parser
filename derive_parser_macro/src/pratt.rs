@@ -141,17 +141,13 @@ pub fn derive(
 
   let (infix, prepost): (Vec<_>, Vec<_>) = variants
     .into_iter()
-    .enumerate()
     .map(
-      |(
-        i,
-        Variant {
-          attrs,
-          ident,
-          fields,
-          ..
-        },
-      )| {
+      |Variant {
+         attrs,
+         ident,
+         fields,
+         ..
+       }| {
         let placeholders = match fields {
           Fields::Unit => quote! {},
           Fields::Unnamed(_) => quote! { (..) },

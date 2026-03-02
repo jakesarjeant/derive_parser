@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use syn::{
   Type,
   spanned::Spanned,
-  visit_mut::{VisitMut, visit_type_mut, visit_type_path_mut},
+  visit_mut::{VisitMut, visit_type_path_mut},
 };
 
 #[derive(Default)]

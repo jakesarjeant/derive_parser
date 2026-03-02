@@ -1,11 +1,5 @@
-use std::{
-  collections::HashMap,
-  fmt::{Debug, Display},
-  io::stdout,
-  ops::Range,
-};
+use std::{collections::HashMap, fmt::Debug, io::stdout, ops::Range};
 
-use anyhow::bail;
 use ariadne::{Color, Label, Report, ReportKind, Source};
 use crossterm::{
   ExecutableCommand, cursor,
@@ -153,7 +147,6 @@ impl Eval for Pratt<Operator, Atom> {
           Operator::Sub(t) => Ok(Value::Number(lhs - rhs, Some(t.span()))),
           Operator::Mul(t) => Ok(Value::Number(lhs * rhs, Some(t.span()))),
           Operator::Div(t) => Ok(Value::Number(lhs / rhs, Some(t.span()))),
-          _ => unreachable!(),
         }
       }
       Pratt::Prefix {
@@ -251,7 +244,7 @@ pub struct Param(#[token(Ident)] pub Token);
 pub struct Delim(#[token(Comma)] pub Token);
 
 impl Eval for Function {
-  fn eval(&self, cx: &mut Context) -> Result<Value> {
+  fn eval(&self, _cx: &mut Context) -> Result<Value> {
     Ok(Value::Function(
       self
         .params

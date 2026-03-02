@@ -1,15 +1,15 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use crate::{Error, Input, Parse, Span, Spanned, Success};
 
 pub trait Precedence: Parse {
-  fn prefix_precedence(val: &Self::Output) -> Option<u8> {
+  fn prefix_precedence(_val: &Self::Output) -> Option<u8> {
     None
   }
-  fn postfix_precedence(val: &Self::Output) -> Option<u8> {
+  fn postfix_precedence(_val: &Self::Output) -> Option<u8> {
     None
   }
-  fn infix_precedence(val: &Self::Output) -> Option<(u8, u8)> {
+  fn infix_precedence(_val: &Self::Output) -> Option<(u8, u8)> {
     Some((1, 2))
   }
 
