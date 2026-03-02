@@ -10,7 +10,7 @@ keywords = [ "parser", "parsing", "derive", "proc_macro", "syntax" ]
 categories = [ "parsing" ]
 
 [dependencies]
-derive_parser_macro = { path = "derive_parser_macro" }
+derive_parser_macro = { version = "0.1.0", path = "derive_parser_macro" }
 variadics_please = "1.1.0"
 thiserror = "2.0.17"
 

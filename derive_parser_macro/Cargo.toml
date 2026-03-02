@@ -1,7 +1,13 @@
 [package]
 name = "derive_parser_macro"
+description = "Derive macros for `derive_parser`"
 version = "0.1.0"
+repository = "https://github.com/jakesarjeant/derive_parser/tree/master/derive_parser_macro"
+readme = "../README.md"
 edition = "2024"
+license = "BSD-3-Clause"
+keywords = [ "parser", "parsing", "derive", "proc_macro", "syntax" ]
+categories = [ "parsing" ]
 
 [lib]
 proc-macro = true
