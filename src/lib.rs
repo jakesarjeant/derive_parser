@@ -111,6 +111,33 @@ impl<T: Debug> Parse for PhantomData<T> {
   }
 }
 
+macro_rules! impl_parse {
+  (($T0:ident, $_:ident) $(,)? $(($T:ident, $t:ident)),*) => {
+    impl<$T0, $($T),*> Parse for ($T0, $($T,)*)
+    where
+      $T0: Parse<Output = $T0>,
+      $($T: Parse<Output = $T, Token = $T0::Token>,)*
+    {
+      type Token = <$T0 as Parse>::Token;
+      type Output = ($T0, $($T,)*);
+
+      fn parse<I>(input: &mut I) -> Result<Success<Self::Output, I>, Error<I>>
+      where
+        I: Input<Token = Self::Token>
+      {
+        #[allow(unused_mut)]
+        let mut res = $T0::parse(input)?;
+        $(
+          let $t = res.merge($T::parse(input)?);
+        )*
+        Ok(res.map(|t0| (t0, $($t,)*)))
+      }
+    }
+  };
+}
+
+variadics_please::all_tuples!(impl_parse, 1, 15, T, t);
+
 #[derive(Clone)]
 pub struct Success<O, I: Input>(#[doc(hidden)] pub O, #[doc(hidden)] pub Option<Error<I>>);
 
