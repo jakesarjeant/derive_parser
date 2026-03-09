@@ -363,7 +363,7 @@ fn field_parse_fn(
       let (vars, fields): (Vec<_>, Vec<_>) = names.iter().cloned().unzip();
       quote! { {#(#fields: #vars),*} }
     }
-    Fields::Unit => quote! { () },
+    Fields::Unit => quote! {},
   };
 
   let lifetimes = variant_ident
@@ -675,7 +675,7 @@ pub fn spanned_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream
       Fields::Named(_) => {
         quote! { {#(#names),*} }
       }
-      Fields::Unit => quote! { () },
+      Fields::Unit => quote! {},
     }
   }
 
